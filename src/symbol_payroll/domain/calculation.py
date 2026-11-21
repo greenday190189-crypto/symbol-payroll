@@ -219,6 +219,15 @@ def calculate_payroll(
 
     if tax_mode is TaxMode.AUTOMATIC and tax_calculator is None:
         raise ValueError("Автоматический НДФЛ недоступен без подключённого налогового профиля")
+    if tax_mode is TaxMode.AUTOMATIC and any(
+        employee.salary_amount is not None
+        and employee.salary_basis is not SalaryBasis.GROSS
+        for employee in employees
+    ):
+        raise ValueError(
+            "Автоматический НДФЛ требует подтверждённого gross-оклада; "
+            "суммы net и неуточнённые оклады пока не поддерживают автоматический пересчёт"
+        )
     if tax_mode in (TaxMode.MANUAL, TaxMode.IMPORTED):
         pass
     elif tax_mode is TaxMode.DISABLED:
