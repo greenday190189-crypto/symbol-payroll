@@ -84,7 +84,8 @@ class BonusPool:
         if unknown:
             raise ValueError(f"Премиальный фонд {self.code}: неизвестные сотрудники {sorted(unknown)}")
         if self.method is AllocationMethod.WEIGHTS:
-            if any(self.weights.get(person, ZERO) < ZERO for person in self.recipients):
+            weighted_people = set(self.participants) | set(self.recipients)
+            if any(self.weights.get(person, ZERO) < ZERO for person in weighted_people):
                 raise ValueError("Вес распределения не может быть отрицательным")
             if sum((self.weights.get(person, ZERO) for person in self.recipients), ZERO) <= ZERO:
                 raise ValueError("Сумма весов получателей должна быть больше нуля")
