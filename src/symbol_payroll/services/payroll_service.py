@@ -77,7 +77,15 @@ def calculate_period(
 
     for person in employees:
         rate = get_salary_rate_for_date(connection, person.id, calculation_day)
-        salary_amount = rate.salary_amount if rate else person.salary_amount
+        has_salary_history = connection.execute(
+            "SELECT 1 FROM employee_salary_history WHERE employee_id = ? LIMIT 1",
+            (person.id,),
+        ).fetchone() is not None
+        salary_amount = (
+            rate.salary_amount if rate else (
+                None if has_salary_history else person.salary_amount
+            )
+        )
         salary_basis = rate.salary_basis if rate else person.salary_basis
         salary_effective_from = rate.effective_from if rate else None
         salary_version = rate.version if rate else None
@@ -108,10 +116,22 @@ def calculate_period(
                 "автоматически не начислен. Настройте формулу оплаты фактического времени."
             )
 
-        if salary_amount is not None and salary_effective_from is None:
+        if salary_amount is not None and salary_effective_from is None and rate is not None:
             warnings.append(
                 f"{person.full_name}: дата начала действия оклада не подтверждена; "
                 "ставка перенесена из старой карточки без даты"
+            )
+
+        future_salary_date = connection.execute(
+            """SELECT MIN(effective_from) AS next_effective_from
+               FROM employee_salary_history
+               WHERE employee_id = ? AND effective_from > ?""",
+            (person.id, period_end.isoformat()),
+        ).fetchone()["next_effective_from"]
+        if rate is None and has_salary_history and future_salary_date:
+            warnings.append(
+                f"{person.full_name}: нет ставки оклада, действующей в расчётном периоде; "
+                f"первая подтверждённая ставка начинается {future_salary_date}"
             )
 
         salary_change = connection.execute(
