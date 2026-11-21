@@ -4,8 +4,8 @@ from PyInstaller.utils.hooks import collect_submodules
 hiddenimports = collect_submodules("symbol_payroll")
 
 a = Analysis(
-    ["src/symbol_payroll/__main__.py"],
-    pathex=["src"],
+    ["../src/symbol_payroll/__main__.py"],
+    pathex=["../src"],
     binaries=[],
     datas=[],
     hiddenimports=hiddenimports,
