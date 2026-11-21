@@ -410,11 +410,20 @@ def list_employees(
             hired_on = date.fromisoformat(row["hired_on"]) if row["hired_on"] else None
         except (InvalidOperation, ValueError) as exc:
             raise RuntimeError(f"Повреждены данные сотрудника {row['id']}") from exc
-        latest = _latest_salary_rate(connection, row["id"])
+        current_rate = get_salary_rate_for_date(connection, row["id"], date.today())
+        if current_rate is not None:
+            amount = current_rate.salary_amount
+            basis = current_rate.salary_basis
+            effective_from = current_rate.effective_from
+        else:
+            next_rate = _latest_salary_rate(connection, row["id"])
+            if next_rate is not None:
+                amount = next_rate.salary_amount
+                basis = next_rate.salary_basis
+            effective_from = next_rate.effective_from if next_rate else None
         records.append(EmployeeRecord(
             row["id"], row["store_id"], row["full_name"], row["position"],
-            bool(row["active"]), amount, basis, hired_on,
-            latest.effective_from if latest else None,
+            bool(row["active"]), amount, basis, hired_on, effective_from,
         ))
     return records
 
