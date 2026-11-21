@@ -808,7 +808,7 @@ class CalculationsPage(QWidget):
             path = export_period_workbook(self.connection, period_id, destination)
             QMessageBox.information(
                 self, "Экспорт завершён",
-                f"Ведомость сохранена:\\n{path}\\n\\n"
+                f"Ведомость сохранена:\n{path}\n\n"
                 "Файл сформирован из сохранённых снимков без повторного расчёта.",
             )
         except Exception as exc:
@@ -1190,9 +1190,9 @@ def main() -> int:
                 QMessageBox.information(
                     None,
                     "Импорт завершён",
-                    f"Добавлено магазинов: {imported['stores']}\\n"
-                    f"Сотрудников: {imported['employees']}\\n"
-                    f"Строк без ФИО для ручной привязки: {imported['role_placeholders']}\\n\\n"
+                    f"Добавлено магазинов: {imported['stores']}\n"
+                    f"Сотрудников: {imported['employees']}\n"
+                    f"Строк без ФИО для ручной привязки: {imported['role_placeholders']}\n\n"
                     "Проверьте список сотрудников и уточните тип каждого оклада. "
                     "Правила оплаты из Excel не активированы.",
                 )
