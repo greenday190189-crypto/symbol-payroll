@@ -227,3 +227,18 @@ def list_period_snapshots(
             (period_id,),
         )
     ]
+
+
+
+def list_periods(connection: sqlite3.Connection) -> list[PayrollPeriodRecord]:
+    """Возвращает периоды от новых к старым."""
+    return [
+        PayrollPeriodRecord(
+            row["id"], date.fromisoformat(row["period_start"]),
+            date.fromisoformat(row["period_end"]), row["status"],
+        )
+        for row in connection.execute(
+            """SELECT id, period_start, period_end, status
+               FROM payroll_periods ORDER BY period_start DESC, id DESC"""
+        )
+    ]
