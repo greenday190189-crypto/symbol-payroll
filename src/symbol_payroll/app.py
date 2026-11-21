@@ -319,7 +319,9 @@ class ExcelImportDialog(QDialog):
         self.import_button.setEnabled(False)
         self.import_button.clicked.connect(self.apply_import)
         self.status = QLabel(
-            "Выберите файл, лист и магазин. Данные не будут записаны до проверки и подтверждения."
+            "Выберите файл, лист и магазин. Не сопоставленные числовые колонки сохранят "
+            "текущие значения сотрудника; отсутствующие в файле сотрудники не изменяются. "
+            "Данные не будут записаны до проверки и подтверждения."
         )
         self.status.setWordWrap(True)
 
@@ -413,10 +415,10 @@ class ExcelImportDialog(QDialog):
             for row_index, row in enumerate(self.preview.rows):
                 values = [
                     str(row.source_row), row.employee_name,
-                    str(row.values.get("shifts", 0)),
-                    str(row.values.get("hours", 0)),
-                    str(row.values.get("sales", 0)),
-                    str(row.values.get("advances", 0)),
+                    str(row.values.get("shifts")) if row.values.get("shifts") is not None else "—",
+                    str(row.values.get("hours")) if row.values.get("hours") is not None else "—",
+                    str(row.values.get("sales")) if row.values.get("sales") is not None else "—",
+                    str(row.values.get("advances")) if row.values.get("advances") is not None else "—",
                     "ОШИБКА: " + "; ".join(row.errors) if row.errors else "Готово",
                 ]
                 for column, value in enumerate(values):
