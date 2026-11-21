@@ -11,6 +11,7 @@ from uuid import uuid4
 from symbol_payroll.domain.calculation import EmployeeInput, PayComponent, calculate_payroll
 from symbol_payroll.domain.pay import SalaryBasis
 from symbol_payroll.domain.tax import TaxMode
+from symbol_payroll.infrastructure.repositories import invalidate_calculated_periods
 
 ZERO = Decimal("0")
 ALLOWED_CATEGORIES = {"earning", "bonus", "net_salary", "deduction", "unclassified"}
@@ -99,6 +100,7 @@ def create_termination_case(
             ),
         )
         connection.execute("UPDATE employees SET active = 0 WHERE id = ?", (employee_id,))
+        invalidate_calculated_periods(connection)
     return case_id
 
 
