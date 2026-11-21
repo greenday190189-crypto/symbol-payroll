@@ -61,6 +61,10 @@ def select_rule(
     }
     highest = max(priorities[rule.scope] for rule in candidates)
     winners = [rule for rule in candidates if priorities[rule.scope] == highest]
+    latest_start = max(rule.effective_from for rule in winners)
+    winners = [rule for rule in winners if rule.effective_from == latest_start]
+    latest_version = max(rule.version for rule in winners)
+    winners = [rule for rule in winners if rule.version == latest_version]
     if len(winners) != 1:
         raise ValueError(f"Неоднозначные правила для показателя {winners[0].code}")
     return winners[0]
