@@ -176,7 +176,11 @@ def calculate_payroll(
         if employee.salary_basis is SalaryBasis.UNCONFIRMED:
             warnings.append(
                 f"{employee.full_name}: тип оклада gross/net не определён; "
-                "значение включено в начисления без пересчёта НДФЛ"
+                "сумма вынесена в неклассифицированные данные и не включена в итоги"
+            )
+            result_components[employee.employee_id].append(
+                PayComponent("unclassified_salary", "Оклад — требуется уточнение типа",
+                             money(employee.salary_amount), "unclassified")
             )
         elif employee.salary_basis is SalaryBasis.GROSS:
             result_components[employee.employee_id].append(
@@ -188,7 +192,8 @@ def calculate_payroll(
                 "не выполняется без налогового профиля"
             )
             result_components[employee.employee_id].append(
-                PayComponent("base_salary_net", "Оклад (сумма на руки)", money(employee.salary_amount))
+                PayComponent("base_salary_net", "Оклад (сумма на руки)",
+                             money(employee.salary_amount), "net_salary")
             )
         if employee.fixed_adjustments:
             result_components[employee.employee_id].append(
@@ -214,7 +219,12 @@ def calculate_payroll(
     employee_results: list[EmployeeResult] = []
     for employee in employees:
         lines = result_components[employee.employee_id]
-        gross = money(sum((line.amount for line in lines), ZERO))
+        gross = money(sum(
+            (line.amount for line in lines if line.category in ("earning", "bonus")), ZERO
+        ))
+        direct_net = money(sum(
+            (line.amount for line in lines if line.category == "net_salary"), ZERO
+        ))
         if tax_mode is TaxMode.AUTOMATIC:
             assert tax_calculator is not None
             tax = money(tax_calculator.calculate(employee, gross))
@@ -225,7 +235,8 @@ def calculate_payroll(
         if tax > gross:
             raise ValueError(f"НДФЛ превышает начисления сотрудника {employee.full_name}")
         employee_results.append(EmployeeResult(
-            employee.employee_id, employee.full_name, tuple(lines), gross, tax, money(gross - tax)
+            employee.employee_id, employee.full_name, tuple(lines), gross, tax,
+            money(gross - tax + direct_net)
         ))
 
     return PayrollResult(
