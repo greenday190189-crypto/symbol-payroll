@@ -45,7 +45,8 @@ from symbol_payroll.services.termination_service import (
     create_termination_case, list_termination_cases,
 )
 from symbol_payroll.infrastructure.repositories import (
-    create_employee, create_store, list_employees, list_stores, update_employee,
+    create_employee, create_store, list_employees, list_salary_history,
+    list_stores, update_employee,
 )
 
 
@@ -84,12 +85,27 @@ class EmployeeDialog(QDialog):
         self.active = QCheckBox("Активен — участвует в новых расчётах")
         self.active.setChecked(employee.active if employee else True)
 
+        self.hired_on = QDateEdit(QDate.currentDate())
+        self.hired_on.setCalendarPopup(True)
+        self.hire_date_confirmed = QCheckBox("Дата приёма подтверждена")
+        self.hire_date_confirmed.setChecked(employee is None or employee.hired_on is not None)
+        self.salary_effective_from = QDateEdit(QDate.currentDate())
+        self.salary_effective_from.setCalendarPopup(True)
+        self.salary_date_confirmed = QCheckBox("Дата начала действия оклада подтверждена")
+        self.salary_date_confirmed.setChecked(
+            employee is None or employee.salary_effective_from is not None
+        )
+
         form = QFormLayout(self)
         form.addRow("Магазин", self.store)
         form.addRow("ФИО", self.full_name)
         form.addRow("Должность", self.position)
+        form.addRow("Дата приёма", self.hired_on)
+        form.addRow("", self.hire_date_confirmed)
         form.addRow("Оклад, руб. (необязательно)", self.salary)
         form.addRow("Как трактовать оклад", self.basis)
+        form.addRow("Ставка действует с", self.salary_effective_from)
+        form.addRow("", self.salary_date_confirmed)
         if employee is not None:
             form.addRow("Статус", self.active)
             self.store.setCurrentIndex(self.store.findData(employee.store_id))
@@ -99,7 +115,24 @@ class EmployeeDialog(QDialog):
                 str(employee.salary_amount) if employee.salary_amount is not None else ""
             )
             self.basis.setCurrentIndex(self.basis.findData(employee.salary_basis.value))
+            if employee.hired_on is not None:
+                self.hired_on.setDate(QDate(
+                    employee.hired_on.year, employee.hired_on.month, employee.hired_on.day
+                ))
+            if employee.salary_effective_from is not None:
+                self.salary_effective_from.setDate(QDate(
+                    employee.salary_effective_from.year,
+                    employee.salary_effective_from.month,
+                    employee.salary_effective_from.day,
+                ))
 
+        help_text = QLabel(
+            "При изменении оклада создаётся новая версия ставки с указанной датой. "
+            "Старые версии не перезаписываются. Для импортированных сотрудников "
+            "подтвердите реальные даты — приложение не угадывает их по ведомости."
+        )
+        help_text.setWordWrap(True)
+        form.addRow(help_text)
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
@@ -112,14 +145,75 @@ class EmployeeDialog(QDialog):
         salary = Decimal(raw_salary) if raw_salary else None
         if salary is not None and (not salary.is_finite() or salary < 0):
             raise ValueError("Оклад должен быть конечным неотрицательным числом")
+        basis = SalaryBasis(self.basis.currentData())
+        salary_changed = (
+            self.employee is None
+            or salary != self.employee.salary_amount
+            or basis is not self.employee.salary_basis
+        )
+        if self.employee is None and not self.hire_date_confirmed.isChecked():
+            raise ValueError("Для нового сотрудника укажите подтверждённую дату приёма")
+        if salary_changed and salary is not None and not self.salary_date_confirmed.isChecked():
+            raise ValueError("Для новой ставки укажите дату начала действия оклада")
+        if (
+            salary_changed and self.employee is not None
+            and not self.salary_date_confirmed.isChecked()
+        ):
+            raise ValueError("При изменении оклада подтвердите дату начала действия новой ставки")
+
+        hire_date = (
+            self.hired_on.date().toPython()
+            if self.hire_date_confirmed.isChecked() else None
+        )
+        salary_date = (
+            self.salary_effective_from.date().toPython()
+            if self.salary_date_confirmed.isChecked() else None
+        )
+        if hire_date is not None and salary_date is not None and salary_date < hire_date:
+            raise ValueError("Дата начала оклада не может быть раньше даты приёма")
         return (
             self.store.currentData(),
             self.full_name.text(),
             self.position.text(),
             salary,
-            SalaryBasis(self.basis.currentData()),
+            basis,
             self.active.isChecked(),
+            hire_date,
+            salary_date,
         )
+
+
+class SalaryHistoryDialog(QDialog):
+    def __init__(self, connection, employee, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(f"История оклада — {employee.full_name}")
+        self.resize(680, 360)
+        table = QTableWidget()
+        table.setColumnCount(4)
+        table.setHorizontalHeaderLabels(["Дата начала", "Оклад, руб.", "Тип", "Версия"])
+        rates = list_salary_history(connection, employee.id)
+        table.setRowCount(len(rates))
+        for row, rate in enumerate(rates):
+            values = [
+                rate.effective_from.isoformat() if rate.effective_from else "Дата не подтверждена",
+                str(rate.salary_amount) if rate.salary_amount is not None else "Без оклада",
+                rate.salary_basis.value, str(rate.version),
+            ]
+            for col, value in enumerate(values):
+                table.setItem(row, col, QTableWidgetItem(value))
+        table.resizeColumnsToContents()
+        layout = QVBoxLayout(self)
+        layout.addWidget(table)
+        note = QLabel(
+            "Записи истории не перезаписываются. Версия без даты — перенесённое "
+            "значение из старой карточки, а не подтверждённая историческая ставка."
+        )
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(self.reject)
+        buttons.accepted.connect(self.accept)
+        layout.addWidget(buttons)
 
 
 class RuleDialog(QDialog):
@@ -226,27 +320,51 @@ class DirectoryPage(QWidget):
         buttons = QHBoxLayout()
         buttons.addWidget(self.add_button)
         self.edit_button = None
+        self.history_button = None
         if employees:
             self.edit_button = QPushButton("Изменить выбранного сотрудника")
             self.edit_button.setEnabled(False)
             self.edit_button.clicked.connect(self.edit_record)
-            self.table.itemSelectionChanged.connect(self._update_edit_button_state)
             buttons.addWidget(self.edit_button)
+            self.history_button = QPushButton("История оклада")
+            self.history_button.setEnabled(False)
+            self.history_button.clicked.connect(self.show_salary_history)
+            buttons.addWidget(self.history_button)
+            self.table.itemSelectionChanged.connect(self._update_edit_button_state)
         layout = QVBoxLayout(self)
         layout.addWidget(self.table)
         layout.addLayout(buttons)
         self.refresh()
 
     def _update_edit_button_state(self) -> None:
+        selected = self.table.currentRow() >= 0
         if self.edit_button is not None:
-            self.edit_button.setEnabled(self.table.currentRow() >= 0)
+            self.edit_button.setEnabled(selected)
+        if self.history_button is not None:
+            self.history_button.setEnabled(selected)
+
+    def _selected_employee(self):
+        if not self.is_employees or self.table.currentRow() < 0:
+            return None
+        name_item = self.table.item(self.table.currentRow(), 0)
+        employee_id = name_item.data(Qt.ItemDataRole.UserRole) if name_item else None
+        if not employee_id:
+            return None
+        return next(
+            (item for item in list_employees(self.connection, include_inactive=True)
+             if item.id == employee_id),
+            None,
+        )
 
     def refresh(self) -> None:
         self.table.clearSelection()
         self.table.setCurrentCell(-1, -1)
         if self.is_employees:
             records = list_employees(self.connection, include_inactive=True)
-            headers = ["ФИО", "Магазин", "Должность", "Оклад", "Тип оклада", "Активен"]
+            headers = [
+                "ФИО", "Магазин", "Должность", "Оклад", "Тип оклада",
+                "Дата приёма", "Ставка действует с", "Активен",
+            ]
             self.table.setColumnCount(len(headers))
             self.table.setHorizontalHeaderLabels(headers)
             stores = {store.id: store.name for store in list_stores(self.connection, True)}
@@ -259,7 +377,13 @@ class DirectoryPage(QWidget):
                     stores.get(employee.store_id, employee.store_id),
                     employee.position or "—",
                     str(employee.salary_amount) if employee.salary_amount is not None else "—",
-                    employee.salary_basis.value, "Да" if employee.active else "Нет",
+                    employee.salary_basis.value,
+                    employee.hired_on.isoformat() if employee.hired_on else "Не подтверждена",
+                    (
+                        employee.salary_effective_from.isoformat()
+                        if employee.salary_effective_from else "Не подтверждена"
+                    ),
+                    "Да" if employee.active else "Нет",
                 ]
                 for col, value in enumerate(values, start=1):
                     self.table.setItem(row, col, QTableWidgetItem(value))
@@ -285,10 +409,14 @@ class DirectoryPage(QWidget):
                 dialog = EmployeeDialog(stores, self)
                 if dialog.exec() != QDialog.DialogCode.Accepted:
                     return
-                store_id, full_name, position, salary, basis, _active = dialog.values()
+                (
+                    store_id, full_name, position, salary, basis,
+                    _active, hired_on, salary_effective_from,
+                ) = dialog.values()
                 create_employee(
                     self.connection, str(uuid.uuid4()), store_id,
                     full_name, position, salary, basis,
+                    hired_on, salary_effective_from,
                 )
             else:
                 dialog = StoreDialog(self)
@@ -302,20 +430,10 @@ class DirectoryPage(QWidget):
             QMessageBox.critical(self, "Ошибка сохранения", str(exc))
 
     def edit_record(self) -> None:
-        if not self.is_employees or self.table.currentRow() < 0:
-            return
-        name_item = self.table.item(self.table.currentRow(), 0)
-        employee_id = name_item.data(Qt.ItemDataRole.UserRole) if name_item else None
-        if not employee_id:
+        employee = self._selected_employee()
+        if employee is None:
             return
         try:
-            employees = {
-                item.id: item
-                for item in list_employees(self.connection, include_inactive=True)
-            }
-            employee = employees.get(employee_id)
-            if employee is None:
-                raise LookupError("Выбранный сотрудник больше не существует")
             stores = list_stores(self.connection)
             if employee.store_id not in {store.id for store in stores}:
                 all_stores = list_stores(self.connection, include_inactive=True)
@@ -323,16 +441,27 @@ class DirectoryPage(QWidget):
             dialog = EmployeeDialog(stores, self, employee)
             if dialog.exec() != QDialog.DialogCode.Accepted:
                 return
-            store_id, full_name, position, salary, basis, active = dialog.values()
+            (
+                store_id, full_name, position, salary, basis,
+                active, hired_on, salary_effective_from,
+            ) = dialog.values()
             update_employee(
                 self.connection, employee.id, store_id,
                 full_name, position, salary, basis, active,
+                hired_on, salary_effective_from,
             )
             self.refresh()
         except (ValueError, ArithmeticError) as exc:
             QMessageBox.warning(self, "Проверьте данные", str(exc))
         except Exception as exc:
             QMessageBox.critical(self, "Ошибка сохранения", str(exc))
+
+    def show_salary_history(self) -> None:
+        employee = self._selected_employee()
+        if employee is None:
+            return
+        dialog = SalaryHistoryDialog(self.connection, employee, self)
+        dialog.exec()
 
 
 class RulesPage(QWidget):
