@@ -340,3 +340,23 @@ def test_missing_hire_date_blocks_payroll_approval(db) -> None:
     assert any("дата приёма не подтверждена" in x for x in result.warnings)
     with pytest.raises(ValueError, match="Нельзя утвердить ведомость"):
         transition_period(db, "2026-10", "approved")
+
+
+
+def test_salary_that_starts_after_period_is_not_applied_retroactively(db) -> None:
+    create_employee(
+        db, "e3", "s1", "Сидорова Анна", "Продавец",
+        Decimal("50000"), SalaryBasis.GROSS,
+        date(2020, 1, 1), date(2026, 12, 1),
+    )
+    for employee_id in ("e1", "e2", "e3"):
+        save_period_input(
+            db, PeriodEmployeeInput("2026-10", employee_id, shifts=Decimal("10"))
+        )
+
+    result = calculate_period(db, "2026-10")
+    new_employee = next(x for x in result.employees if x.employee_id == "e3")
+    assert not any(line.code == "base_salary" for line in new_employee.components)
+    assert any("нет ставки оклада, действующей в расчётном периоде" in x for x in result.warnings)
+    with pytest.raises(ValueError, match="Нельзя утвердить ведомость"):
+        transition_period(db, "2026-10", "approved")
