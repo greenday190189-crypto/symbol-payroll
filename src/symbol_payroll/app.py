@@ -45,7 +45,7 @@ from symbol_payroll.services.termination_service import (
     create_termination_case, list_termination_cases,
 )
 from symbol_payroll.infrastructure.repositories import (
-    create_employee, create_store, list_employees, list_stores,
+    create_employee, create_store, list_employees, list_stores, update_employee,
 )
 
 
@@ -65,9 +65,12 @@ class StoreDialog(QDialog):
 
 
 class EmployeeDialog(QDialog):
-    def __init__(self, stores, parent: QWidget | None = None) -> None:
+    def __init__(
+        self, stores, parent: QWidget | None = None, employee=None
+    ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Добавить сотрудника")
+        self.employee = employee
+        self.setWindowTitle("Изменить сотрудника" if employee else "Добавить сотрудника")
         self.store = QComboBox()
         for store in stores:
             self.store.addItem(store.name, store.id)
@@ -78,18 +81,45 @@ class EmployeeDialog(QDialog):
         self.basis.addItem("Не определено", SalaryBasis.UNCONFIRMED.value)
         self.basis.addItem("До НДФЛ (gross)", SalaryBasis.GROSS.value)
         self.basis.addItem("На руки (net)", SalaryBasis.NET.value)
+        self.active = QCheckBox("Активен — участвует в новых расчётах")
+        self.active.setChecked(employee.active if employee else True)
+
         form = QFormLayout(self)
         form.addRow("Магазин", self.store)
         form.addRow("ФИО", self.full_name)
         form.addRow("Должность", self.position)
         form.addRow("Оклад, руб. (необязательно)", self.salary)
         form.addRow("Как трактовать оклад", self.basis)
+        if employee is not None:
+            form.addRow("Статус", self.active)
+            self.store.setCurrentIndex(self.store.findData(employee.store_id))
+            self.full_name.setText(employee.full_name)
+            self.position.setText(employee.position or "")
+            self.salary.setText(
+                str(employee.salary_amount) if employee.salary_amount is not None else ""
+            )
+            self.basis.setCurrentIndex(self.basis.findData(employee.salary_basis.value))
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)
+
+    def values(self):
+        raw_salary = self.salary.text().strip().replace(" ", "").replace(",", ".")
+        salary = Decimal(raw_salary) if raw_salary else None
+        if salary is not None and (not salary.is_finite() or salary < 0):
+            raise ValueError("Оклад должен быть конечным неотрицательным числом")
+        return (
+            self.store.currentData(),
+            self.full_name.text(),
+            self.position.text(),
+            salary,
+            SalaryBasis(self.basis.currentData()),
+            self.active.isChecked(),
+        )
 
 
 class RuleDialog(QDialog):
@@ -193,12 +223,27 @@ class DirectoryPage(QWidget):
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.add_button = QPushButton("Добавить сотрудника" if employees else "Добавить магазин")
         self.add_button.clicked.connect(self.add_record)
+        buttons = QHBoxLayout()
+        buttons.addWidget(self.add_button)
+        self.edit_button = None
+        if employees:
+            self.edit_button = QPushButton("Изменить выбранного сотрудника")
+            self.edit_button.setEnabled(False)
+            self.edit_button.clicked.connect(self.edit_record)
+            self.table.itemSelectionChanged.connect(self._update_edit_button_state)
+            buttons.addWidget(self.edit_button)
         layout = QVBoxLayout(self)
         layout.addWidget(self.table)
-        layout.addWidget(self.add_button)
+        layout.addLayout(buttons)
         self.refresh()
 
+    def _update_edit_button_state(self) -> None:
+        if self.edit_button is not None:
+            self.edit_button.setEnabled(self.table.currentRow() >= 0)
+
     def refresh(self) -> None:
+        self.table.clearSelection()
+        self.table.setCurrentCell(-1, -1)
         if self.is_employees:
             records = list_employees(self.connection, include_inactive=True)
             headers = ["ФИО", "Магазин", "Должность", "Оклад", "Тип оклада", "Активен"]
@@ -206,14 +251,17 @@ class DirectoryPage(QWidget):
             self.table.setHorizontalHeaderLabels(headers)
             stores = {store.id: store.name for store in list_stores(self.connection, True)}
             self.table.setRowCount(len(records))
-            for row, item in enumerate(records):
+            for row, employee in enumerate(records):
+                name_item = QTableWidgetItem(employee.full_name)
+                name_item.setData(Qt.ItemDataRole.UserRole, employee.id)
+                self.table.setItem(row, 0, name_item)
                 values = [
-                    item.full_name, stores.get(item.store_id, item.store_id),
-                    item.position or "—",
-                    str(item.salary_amount) if item.salary_amount is not None else "—",
-                    item.salary_basis.value, "Да" if item.active else "Нет",
+                    stores.get(employee.store_id, employee.store_id),
+                    employee.position or "—",
+                    str(employee.salary_amount) if employee.salary_amount is not None else "—",
+                    employee.salary_basis.value, "Да" if employee.active else "Нет",
                 ]
-                for col, value in enumerate(values):
+                for col, value in enumerate(values, start=1):
                     self.table.setItem(row, col, QTableWidgetItem(value))
         else:
             records = list_stores(self.connection, include_inactive=True)
@@ -225,6 +273,7 @@ class DirectoryPage(QWidget):
                 self.table.setItem(row, 0, QTableWidgetItem(item.name))
                 self.table.setItem(row, 1, QTableWidgetItem("Активен" if item.active else "Неактивен"))
         self.table.resizeColumnsToContents()
+        self._update_edit_button_state()
 
     def add_record(self) -> None:
         try:
@@ -236,18 +285,49 @@ class DirectoryPage(QWidget):
                 dialog = EmployeeDialog(stores, self)
                 if dialog.exec() != QDialog.DialogCode.Accepted:
                     return
-                raw_salary = dialog.salary.text().strip().replace(" ", "").replace(",", ".")
-                salary = Decimal(raw_salary) if raw_salary else None
+                store_id, full_name, position, salary, basis, _active = dialog.values()
                 create_employee(
-                    self.connection, str(uuid.uuid4()), dialog.store.currentData(),
-                    dialog.full_name.text(), dialog.position.text(), salary,
-                    SalaryBasis(dialog.basis.currentData()),
+                    self.connection, str(uuid.uuid4()), store_id,
+                    full_name, position, salary, basis,
                 )
             else:
                 dialog = StoreDialog(self)
                 if dialog.exec() != QDialog.DialogCode.Accepted:
                     return
                 create_store(self.connection, str(uuid.uuid4()), dialog.name.text())
+            self.refresh()
+        except (ValueError, ArithmeticError) as exc:
+            QMessageBox.warning(self, "Проверьте данные", str(exc))
+        except Exception as exc:
+            QMessageBox.critical(self, "Ошибка сохранения", str(exc))
+
+    def edit_record(self) -> None:
+        if not self.is_employees or self.table.currentRow() < 0:
+            return
+        name_item = self.table.item(self.table.currentRow(), 0)
+        employee_id = name_item.data(Qt.ItemDataRole.UserRole) if name_item else None
+        if not employee_id:
+            return
+        try:
+            employees = {
+                item.id: item
+                for item in list_employees(self.connection, include_inactive=True)
+            }
+            employee = employees.get(employee_id)
+            if employee is None:
+                raise LookupError("Выбранный сотрудник больше не существует")
+            stores = list_stores(self.connection)
+            if employee.store_id not in {store.id for store in stores}:
+                all_stores = list_stores(self.connection, include_inactive=True)
+                stores.extend(store for store in all_stores if store.id == employee.store_id)
+            dialog = EmployeeDialog(stores, self, employee)
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+            store_id, full_name, position, salary, basis, active = dialog.values()
+            update_employee(
+                self.connection, employee.id, store_id,
+                full_name, position, salary, basis, active,
+            )
             self.refresh()
         except (ValueError, ArithmeticError) as exc:
             QMessageBox.warning(self, "Проверьте данные", str(exc))

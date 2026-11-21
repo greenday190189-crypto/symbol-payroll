@@ -6,6 +6,7 @@ from symbol_payroll.domain.pay import SalaryBasis
 from symbol_payroll.infrastructure.database import connect, initialize
 from symbol_payroll.infrastructure.repositories import (
     create_employee, create_store, list_employees, list_stores, set_employee_active,
+    update_employee,
 )
 
 
@@ -39,3 +40,57 @@ def test_blank_names_are_rejected(db) -> None:
         create_store(db, "s1", "  ")
     with pytest.raises(ValueError, match="ФИО"):
         create_employee(db, "e1", "s1", "  ")
+
+
+def test_update_employee_invalidates_unapproved_calculation_and_preserves_approved_history(db) -> None:
+    create_store(db, "s1", "Сигаево")
+    create_employee(
+        db, "e1", "s1", "Иванов Иван", "Продавец", Decimal("42000"), SalaryBasis.UNCONFIRMED
+    )
+    for period_id, status in (("p-draft", "calculated"), ("p-approved", "approved")):
+        db.execute(
+            """INSERT INTO payroll_periods
+               (id, period_start, period_end, status, created_at)
+               VALUES (?, '2026-10-01', '2026-10-31', 'draft', '2026-11-01T00:00:00+00:00')""",
+            (period_id,),
+        )
+        db.execute(
+            """INSERT INTO payroll_snapshots
+               (id, period_id, employee_id, snapshot_json, rules_fingerprint, created_at)
+               VALUES (?, ?, 'e1', '{"full_name":"Иванов Иван"}', 'fingerprint', '2026-11-01T00:00:00+00:00')""",
+            (f"snapshot-{period_id}", period_id),
+        )
+        db.execute("UPDATE payroll_periods SET status = ? WHERE id = ?", (status, period_id))
+
+    updated = update_employee(
+        db, "e1", "s1", "Иванов Иван", "Администратор",
+        Decimal("50000"), SalaryBasis.GROSS, False,
+    )
+
+    assert updated.position == "Администратор"
+    assert updated.salary_amount == Decimal("50000")
+    assert updated.salary_basis is SalaryBasis.GROSS
+    assert updated.active is False
+    assert db.execute(
+        "SELECT status FROM payroll_periods WHERE id = 'p-draft'"
+    ).fetchone()["status"] == "draft"
+    assert db.execute(
+        "SELECT COUNT(*) FROM payroll_snapshots WHERE period_id = 'p-draft'"
+    ).fetchone()[0] == 0
+    assert db.execute(
+        "SELECT status FROM payroll_periods WHERE id = 'p-approved'"
+    ).fetchone()["status"] == "approved"
+    assert db.execute(
+        "SELECT COUNT(*) FROM payroll_snapshots WHERE period_id = 'p-approved'"
+    ).fetchone()[0] == 1
+
+
+def test_update_employee_rejects_non_finite_or_negative_salary(db) -> None:
+    create_store(db, "s1", "Сигаево")
+    create_employee(db, "e1", "s1", "Иванов Иван")
+    for amount in (Decimal("NaN"), Decimal("Infinity"), Decimal("-1")):
+        with pytest.raises(ValueError, match="конечным неотрицательным"):
+            update_employee(
+                db, "e1", "s1", "Иванов Иван", salary_amount=amount,
+                salary_basis=SalaryBasis.UNCONFIRMED,
+            )
