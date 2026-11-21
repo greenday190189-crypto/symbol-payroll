@@ -7,7 +7,7 @@ from symbol_payroll.domain.pay import SalaryBasis, SalaryTerms
 
 def test_unconfirmed_salary_basis_blocks_approval() -> None:
     terms = SalaryTerms(Decimal("50000"))
-    with pytest.raises(ValueError, match="не определено"):
+    with pytest.raises(ValueError, match="Не определено"):
         terms.validate_for_approval()
 
 
