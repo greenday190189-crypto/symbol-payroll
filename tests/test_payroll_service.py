@@ -101,10 +101,17 @@ def test_manual_tax_mode_is_calculated_from_period_input(db) -> None:
 
 
 def test_period_cannot_be_recalculated_after_approval(db) -> None:
+    save_period_input(
+        db, PeriodEmployeeInput("2026-10", "e1", shifts=Decimal("10"))
+    )
     calculate_period(db, "2026-10")
     transition_period(db, "2026-10", "approved")
     with pytest.raises(ValueError, match="Можно рассчитывать только"):
         calculate_period(db, "2026-10")
+    with pytest.raises(Exception, match="Approved payroll inputs are immutable"):
+        db.execute(
+            "UPDATE payroll_inputs SET shifts='99' WHERE period_id='2026-10' AND employee_id='e1'"
+        )
 
 
 
