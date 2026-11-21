@@ -60,8 +60,11 @@ def test_export_contains_network_store_and_personal_sheets(db, tmp_path) -> None
     assert summary["B6"].value == 50000.0
     assert summary["B7"].value == 40000.0
     assert summary["B8"].value == "=SUM(B6:B7)"
-    assert workbook["По магазинам"]["A2"].value == "Сигаево"
-    assert workbook["По магазинам"]["C2"].value == 50000.0
+    assert workbook["По магазинам"]["A2"].value == "Дачная"
+    assert workbook["По магазинам"]["C2"].value == 40000.0
+    store_sheet = workbook["Сигаево"]
+    assert store_sheet["A3"].value == "Магазин: Сигаево"
+    assert store_sheet["B5"].value == 50000.0
     employee_sheet = next(
         workbook[name] for name in workbook.sheetnames if name.startswith("Иванов Иван")
     )
