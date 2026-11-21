@@ -10,6 +10,7 @@ from datetime import date, datetime, timezone
 from uuid import uuid4
 
 from symbol_payroll.domain.rules import PayrollRule, RuleScope
+from symbol_payroll.infrastructure.repositories import invalidate_calculated_periods
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +57,8 @@ def save_rule_version(
             (str(uuid4()), code, scope.value, scope_id, expression, category, title or code, version,
              effective_from.isoformat(), effective_to.isoformat() if effective_to else None),
         )
+        # A new immutable rule version makes every unapproved calculation potentially stale.
+        invalidate_calculated_periods(connection)
     return PayrollRule(
         code, scope, scope_id, expression, version, effective_from, effective_to,
         True, category, title or code,
