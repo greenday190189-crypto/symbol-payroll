@@ -13,7 +13,9 @@ from symbol_payroll.infrastructure.payroll_repository import (
 from symbol_payroll.infrastructure.period_inputs import (
     PeriodEmployeeInput, list_period_inputs, save_period_input,
 )
-from symbol_payroll.infrastructure.repositories import create_employee, create_store
+from symbol_payroll.infrastructure.repositories import (
+    create_employee, create_store, update_employee,
+)
 from symbol_payroll.services.payroll_service import calculate_period
 
 
@@ -101,8 +103,15 @@ def test_manual_tax_mode_is_calculated_from_period_input(db) -> None:
 
 
 def test_period_cannot_be_recalculated_after_approval(db) -> None:
+    update_employee(
+        db, "e2", "s1", "Петров Пётр", "Продавец",
+        Decimal("25000"), SalaryBasis.GROSS,
+    )
     save_period_input(
         db, PeriodEmployeeInput("2026-10", "e1", shifts=Decimal("10"))
+    )
+    save_period_input(
+        db, PeriodEmployeeInput("2026-10", "e2", shifts=Decimal("10"))
     )
     calculate_period(db, "2026-10")
     transition_period(db, "2026-10", "approved")
@@ -189,3 +198,34 @@ def test_custom_variables_cannot_override_standard_inputs(db) -> None:
                 "2026-10", "e1", extra_values={"salary": Decimal("999999")}
             )
         )
+
+
+
+def test_period_cannot_be_approved_with_unconfirmed_salary_basis(db) -> None:
+    save_period_input(
+        db, PeriodEmployeeInput("2026-10", "e1", shifts=Decimal("10"))
+    )
+    save_period_input(
+        db, PeriodEmployeeInput("2026-10", "e2", shifts=Decimal("10"))
+    )
+    result = calculate_period(db, "2026-10")
+    assert any("тип оклада gross/net не определён" in warning for warning in result.warnings)
+
+    with pytest.raises(ValueError, match="Нельзя утвердить ведомость"):
+        transition_period(db, "2026-10", "approved")
+
+    assert db.execute(
+        "SELECT status FROM payroll_periods WHERE id='2026-10'"
+    ).fetchone()["status"] == "calculated"
+    assert len(list_period_snapshots(db, "2026-10")) == 2
+
+
+def test_period_cannot_be_approved_with_missing_period_inputs(db) -> None:
+    save_period_input(
+        db, PeriodEmployeeInput("2026-10", "e1", shifts=Decimal("10"))
+    )
+    result = calculate_period(db, "2026-10")
+    assert any("вводные показатели за период не заполнены" in warning for warning in result.warnings)
+
+    with pytest.raises(ValueError, match="Нельзя утвердить ведомость"):
+        transition_period(db, "2026-10", "approved")

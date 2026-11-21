@@ -36,8 +36,8 @@ from symbol_payroll.infrastructure.period_inputs import (
 from symbol_payroll.infrastructure.payroll_export import export_period_workbook
 from symbol_payroll.infrastructure.termination_export import export_termination_workbook
 from symbol_payroll.infrastructure.payroll_repository import (
-    create_period, list_period_snapshots, list_periods, list_rule_versions,
-    save_rule_version, transition_period,
+    create_period, list_approval_blockers, list_period_snapshots, list_periods,
+    list_rule_versions, save_rule_version, transition_period,
 )
 from symbol_payroll.services.payroll_service import calculate_period
 from symbol_payroll.services.termination_service import (
@@ -731,9 +731,16 @@ class CalculationsPage(QWidget):
                 self.input_table.setItem(row, column, QTableWidgetItem(value))
         self.input_table.resizeColumnsToContents()
         self.load_results(period_id)
+        blockers = list_approval_blockers(self.connection, period_id)
+        blocker_text = (
+            "\nУтверждение заблокировано. Исправьте критические замечания:\n"
+            + "\n".join(f"• {warning}" for warning in blockers[:8])
+            if blockers else ""
+        )
         self.status.setText(
             f"Период {period_id}. Статус: {period['status']}. "
             "Для gross/net используются только подтверждённые настройки оклада."
+            + blocker_text
         )
 
     def set_editable(self, editable: bool) -> None:
@@ -822,7 +829,14 @@ class CalculationsPage(QWidget):
                 f"к выплате: {result.total_net:.2f} руб."
                 + (f"\nПредупреждения:\n{warnings}" if warnings else "")
             )
-            self.approve_button.setEnabled(True)
+            blockers = list_approval_blockers(self.connection, period_id)
+            self.approve_button.setEnabled(not blockers)
+            if blockers:
+                self.status.setText(
+                    self.status.text()
+                    + "\nУтверждение заблокировано. Исправьте критические замечания:\n"
+                    + "\n".join(f"• {warning}" for warning in blockers[:8])
+                )
         except (ValueError, ArithmeticError, LookupError) as exc:
             QMessageBox.warning(self, "Расчёт не выполнен", str(exc))
         except Exception as exc:
@@ -866,7 +880,10 @@ class CalculationsPage(QWidget):
         status = self.connection.execute(
             "SELECT status FROM payroll_periods WHERE id = ?", (period_id,)
         ).fetchone()["status"]
-        self.approve_button.setEnabled(status == "calculated" and bool(snapshots))
+        blockers = list_approval_blockers(self.connection, period_id)
+        self.approve_button.setEnabled(
+            status == "calculated" and bool(snapshots) and not blockers
+        )
         self.export_button.setEnabled(bool(snapshots))
 
     def export_excel(self) -> None:

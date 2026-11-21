@@ -74,6 +74,8 @@ def create_employee(
                VALUES (?, ?, ?, ?, ?, ?)""",
             (employee_id, store_id, name, normalized_position, amount_text, salary_basis.value),
         )
+        # A new employee changes the population of every unapproved payroll.
+        _invalidate_calculated_periods(connection)
     return EmployeeRecord(
         employee_id, store_id, name, normalized_position, True, salary_amount, salary_basis
     )

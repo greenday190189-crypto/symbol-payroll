@@ -126,6 +126,44 @@ def save_employee_snapshot(
     return snapshot_id
 
 
+_APPROVAL_BLOCKING_WARNING_MARKERS = (
+    "тип оклада gross/net не определён",
+    "вводные показатели за период не заполнены",
+    "увольнение внутри периода; полный месячный оклад автоматически не начислен",
+)
+
+
+def list_approval_blockers(
+    connection: sqlite3.Connection, period_id: str
+) -> list[str]:
+    """Return unique critical warnings that make a payroll period unsafe to approve."""
+    rows = connection.execute(
+        "SELECT snapshot_json FROM payroll_snapshots WHERE period_id = ?",
+        (period_id,),
+    ).fetchall()
+    blockers: set[str] = set()
+    for row in rows:
+        try:
+            snapshot = json.loads(row["snapshot_json"])
+        except (TypeError, json.JSONDecodeError):
+            blockers.add("Расчётный снимок повреждён: не удалось прочитать JSON")
+            continue
+        if not isinstance(snapshot, dict):
+            blockers.add("Расчётный снимок повреждён: ожидается JSON-объект")
+            continue
+        warnings = snapshot.get("warnings", [])
+        if not isinstance(warnings, list):
+            blockers.add("Расчётный снимок повреждён: список предупреждений имеет неверный формат")
+            continue
+        for warning in warnings:
+            if not isinstance(warning, str):
+                blockers.add("Расчётный снимок повреждён: предупреждение имеет неверный формат")
+                continue
+            if any(marker in warning for marker in _APPROVAL_BLOCKING_WARNING_MARKERS):
+                blockers.add(warning)
+    return sorted(blockers)
+
+
 def transition_period(
     connection: sqlite3.Connection, period_id: str, target_status: str
 ) -> None:
@@ -146,6 +184,15 @@ def transition_period(
             ).fetchone()["count"]
             if count == 0:
                 raise ValueError("Нельзя утвердить период без сохранённых расчётных снимков")
+            blockers = list_approval_blockers(connection, period_id)
+            if blockers:
+                details = "\n".join(f"• {warning}" for warning in blockers[:12])
+                remaining = len(blockers) - 12
+                suffix = f"\n…и ещё {remaining}" if remaining > 0 else ""
+                raise ValueError(
+                    "Нельзя утвердить ведомость: устраните критические предупреждения.\n"
+                    f"{details}{suffix}"
+                )
         approved_at = _now() if target_status == "approved" else None
         connection.execute(
             "UPDATE payroll_periods SET status = ?, approved_at = COALESCE(?, approved_at) WHERE id = ?",

@@ -94,3 +94,28 @@ def test_update_employee_rejects_non_finite_or_negative_salary(db) -> None:
                 db, "e1", "s1", "Иванов Иван", salary_amount=amount,
                 salary_basis=SalaryBasis.UNCONFIRMED,
             )
+
+
+
+def test_creating_employee_invalidates_calculated_periods(db) -> None:
+    from datetime import date
+
+    from symbol_payroll.infrastructure.payroll_repository import create_period, persist_payroll_result
+    from symbol_payroll.domain.calculation import PayrollResult
+
+    create_store(db, "s1", "Сигаево")
+    create_period(db, "p1", date(2026, 10, 1), date(2026, 10, 31))
+    empty_result = PayrollResult((), Decimal("0"), Decimal("0"), Decimal("0"), Decimal("0"), ())
+    persist_payroll_result(db, "p1", empty_result, [])
+    assert db.execute(
+        "SELECT status FROM payroll_periods WHERE id='p1'"
+    ).fetchone()["status"] == "calculated"
+
+    create_employee(db, "e1", "s1", "Иванов Иван")
+
+    assert db.execute(
+        "SELECT status FROM payroll_periods WHERE id='p1'"
+    ).fetchone()["status"] == "draft"
+    assert db.execute(
+        "SELECT COUNT(*) FROM payroll_snapshots WHERE period_id='p1'"
+    ).fetchone()[0] == 0
