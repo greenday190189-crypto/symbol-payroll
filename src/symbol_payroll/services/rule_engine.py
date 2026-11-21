@@ -54,13 +54,13 @@ def evaluate_rule_components(
             )
             if selected is None:
                 continue
-            category = categories.get(code, "earning")
+            category = categories.get(code, selected.category)
             if category not in known_categories:
                 raise ValueError(f"Правило {code}: неизвестная категория {category}")
             amount = money(evaluate(selected.expression, employee.values))
             if amount < 0:
                 raise ValueError(f"Правило {code}: результат не может быть отрицательным")
             result[employee.employee_id].append(
-                PayComponent(code, titles.get(code, code), amount, category)
+                PayComponent(code, titles.get(code, selected.title or code), amount, category)
             )
     return result
