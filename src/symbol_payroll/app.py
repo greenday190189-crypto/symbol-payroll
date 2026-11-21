@@ -4,18 +4,23 @@ from __future__ import annotations
 
 import sys
 import uuid
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
-from PySide6.QtCore import QStandardPaths
+from PySide6.QtCore import QDate, QStandardPaths
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
-    QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QTabWidget,
-    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QApplication, QCheckBox, QComboBox, QDateEdit, QDialog, QDialogButtonBox,
+    QFormLayout, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton,
+    QTabWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from symbol_payroll.domain.pay import SalaryBasis
+from symbol_payroll.domain.rules import RuleScope
 from symbol_payroll.infrastructure.database import connect, initialize
+from symbol_payroll.infrastructure.payroll_repository import (
+    list_rule_versions, save_rule_version,
+)
 from symbol_payroll.infrastructure.repositories import (
     create_employee, create_store, list_employees, list_stores,
 )
@@ -64,6 +69,64 @@ class EmployeeDialog(QDialog):
         form.addRow(buttons)
 
 
+class RuleDialog(QDialog):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Добавить версию расчётного правила")
+        self.code = QLineEdit()
+        self.scope = QComboBox()
+        for label, value in (
+            ("Вся организация", RuleScope.ORGANIZATION.value),
+            ("Магазин", RuleScope.STORE.value),
+            ("Должность", RuleScope.POSITION.value),
+            ("Сотрудник", RuleScope.EMPLOYEE.value),
+            ("Исключение на период", RuleScope.PERIOD.value),
+        ):
+            self.scope.addItem(label, value)
+        self.scope_id = QLineEdit("*")
+        self.expression = QLineEdit()
+        self.expression.setPlaceholderText("Например: salary / 22 * shifts")
+        self.start = QDateEdit(QDate.currentDate())
+        self.start.setCalendarPopup(True)
+        self.end_enabled = QCheckBox("Ограничить дату окончания")
+        self.end = QDateEdit(QDate.currentDate())
+        self.end.setCalendarPopup(True)
+        self.end.setEnabled(False)
+        self.end_enabled.toggled.connect(self.end.setEnabled)
+
+        form = QFormLayout(self)
+        form.addRow("Код показателя", self.code)
+        form.addRow("Область действия", self.scope)
+        form.addRow("Идентификатор области", self.scope_id)
+        form.addRow("Формула", self.expression)
+        form.addRow("Действует с", self.start)
+        form.addRow(self.end_enabled)
+        form.addRow("Действует по", self.end)
+        hint = QLabel(
+            "Идентификатор: * для организации; ID магазина/сотрудника или точное "
+            "название должности. Исключение на период: ID периода/сотрудника."
+        )
+        hint.setWordWrap(True)
+        form.addRow(hint)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        form.addRow(buttons)
+
+    def values(self):
+        end_date = self.end.date().toPython() if self.end_enabled.isChecked() else None
+        return (
+            self.code.text().strip(),
+            RuleScope(self.scope.currentData()),
+            self.scope_id.text().strip(),
+            self.expression.text().strip(),
+            self.start.date().toPython(),
+            end_date,
+        )
+
+
 class DirectoryPage(QWidget):
     def __init__(self, connection, employees: bool) -> None:
         super().__init__()
@@ -89,9 +152,12 @@ class DirectoryPage(QWidget):
             stores = {store.id: store.name for store in list_stores(self.connection, True)}
             self.table.setRowCount(len(records))
             for row, item in enumerate(records):
-                values = [item.full_name, stores.get(item.store_id, item.store_id),
-                          item.position or "—", str(item.salary_amount) if item.salary_amount is not None else "—",
-                          item.salary_basis.value, "Да" if item.active else "Нет"]
+                values = [
+                    item.full_name, stores.get(item.store_id, item.store_id),
+                    item.position or "—",
+                    str(item.salary_amount) if item.salary_amount is not None else "—",
+                    item.salary_basis.value, "Да" if item.active else "Нет",
+                ]
                 for col, value in enumerate(values):
                     self.table.setItem(row, col, QTableWidgetItem(value))
         else:
@@ -130,7 +196,53 @@ class DirectoryPage(QWidget):
             self.refresh()
         except (ValueError, ArithmeticError) as exc:
             QMessageBox.warning(self, "Проверьте данные", str(exc))
-        except Exception as exc:  # database constraints and unexpected persistence errors
+        except Exception as exc:
+            QMessageBox.critical(self, "Ошибка сохранения", str(exc))
+
+
+class RulesPage(QWidget):
+    def __init__(self, connection) -> None:
+        super().__init__()
+        self.connection = connection
+        self.table = QTableWidget()
+        self.table.setAlternatingRowColors(True)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.add_button = QPushButton("Добавить версию правила")
+        self.add_button.clicked.connect(self.add_rule)
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.table)
+        layout.addWidget(self.add_button)
+        self.refresh()
+
+    def refresh(self) -> None:
+        rules = list_rule_versions(self.connection)
+        headers = ["Показатель", "Область", "ID области", "Формула", "Версия", "С", "По"]
+        self.table.setColumnCount(len(headers))
+        self.table.setHorizontalHeaderLabels(headers)
+        self.table.setRowCount(len(rules))
+        for row, rule in enumerate(rules):
+            values = [
+                rule.code, rule.scope.value, rule.scope_id, rule.expression,
+                str(rule.version), rule.effective_from.isoformat(),
+                rule.effective_to.isoformat() if rule.effective_to else "Без срока",
+            ]
+            for col, value in enumerate(values):
+                self.table.setItem(row, col, QTableWidgetItem(value))
+        self.table.resizeColumnsToContents()
+
+    def add_rule(self) -> None:
+        dialog = RuleDialog(self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        try:
+            code, scope, scope_id, expression, start, end = dialog.values()
+            save_rule_version(
+                self.connection, code, scope, scope_id, expression, start, end
+            )
+            self.refresh()
+        except (ValueError, ArithmeticError) as exc:
+            QMessageBox.warning(self, "Проверьте правило", str(exc))
+        except Exception as exc:
             QMessageBox.critical(self, "Ошибка сохранения", str(exc))
 
 
@@ -143,9 +255,10 @@ class MainWindow(QMainWindow):
         tabs = QTabWidget()
         tabs.addTab(DirectoryPage(connection, employees=False), "Магазины")
         tabs.addTab(DirectoryPage(connection, employees=True), "Сотрудники")
+        tabs.addTab(RulesPage(connection), "Правила оплаты")
         placeholder = QLabel(
-            "Расчётные ведомости и правила оплаты будут подключены на следующих этапах.\n"
-            "Пока не настроены подтверждённые правила, приложение не рассчитывает зарплату."
+            "Расчётные ведомости будут подключены на следующем этапе.\n"
+            "Пока не настроены и не проверены правила, приложение не утверждает расчёты."
         )
         placeholder.setWordWrap(True)
         placeholder.setStyleSheet("padding: 28px; font-size: 16px;")
