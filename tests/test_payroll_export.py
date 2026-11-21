@@ -66,8 +66,8 @@ def test_export_contains_network_store_and_personal_sheets(db, tmp_path) -> None
         workbook[name] for name in workbook.sheetnames if name.startswith("Иванов Иван")
     )
     assert employee_sheet["B2"].value == "Иванов Иван"
-    assert employee_sheet["A7"].value == "Оклад"
-    assert employee_sheet["C7"].value == 50000.0
+    assert employee_sheet["A6"].value == "Оклад"
+    assert employee_sheet["C6"].value == 50000.0
     workbook.close()
 
 
