@@ -195,3 +195,30 @@ def test_v4_database_migrates_existing_salary_as_undated_legacy_rate(tmp_path) -
     assert rate.salary_amount == Decimal("42000")
     assert rate.effective_from is None
     connection.close()
+
+
+
+def test_hire_date_cannot_be_after_termination_or_existing_salary_rate(db) -> None:
+    from symbol_payroll.services.termination_service import create_termination_case
+
+    create_store(db, "s1", "Сигаево")
+    create_employee(
+        db, "e1", "s1", "Иванов Иван",
+        salary_amount=Decimal("30000"), salary_basis=SalaryBasis.GROSS,
+        hired_on=date(2020, 1, 1), salary_effective_from=date(2020, 1, 1),
+    )
+    create_termination_case(db, "e1", date(2025, 12, 31))
+
+    with pytest.raises(ValueError, match="позже даты оформленного увольнения"):
+        update_employee(
+            db, "e1", "s1", "Иванов Иван",
+            salary_amount=Decimal("30000"), salary_basis=SalaryBasis.GROSS,
+            active=False, hired_on=date(2026, 1, 1),
+        )
+
+    with pytest.raises(ValueError, match="ставка раньше даты приёма"):
+        update_employee(
+            db, "e1", "s1", "Иванов Иван",
+            salary_amount=Decimal("30000"), salary_basis=SalaryBasis.GROSS,
+            active=False, hired_on=date(2021, 1, 1),
+        )
