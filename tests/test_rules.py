@@ -42,3 +42,16 @@ def test_ambiguous_rules_at_same_scope_are_rejected() -> None:
             rule(RuleScope.EMPLOYEE, "employee-1", "salary / 22"),
             rule(RuleScope.EMPLOYEE, "employee-1", "salary / 30"),
         ], date(2026, 10, 1), CONTEXT)
+
+
+def test_latest_effective_rule_version_wins_when_periods_overlap() -> None:
+    older = PayrollRule(
+        "base_pay", RuleScope.EMPLOYEE, "employee-1", "salary / 22", 1,
+        date(2026, 1, 1),
+    )
+    newer = PayrollRule(
+        "base_pay", RuleScope.EMPLOYEE, "employee-1", "salary / 30", 2,
+        date(2026, 10, 1),
+    )
+    selected = select_rule([older, newer], date(2026, 10, 15), CONTEXT)
+    assert selected == newer
