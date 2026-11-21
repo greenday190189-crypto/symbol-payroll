@@ -99,6 +99,24 @@ WHEN (SELECT status FROM payroll_periods WHERE id = NEW.period_id) IN ('approved
 BEGIN
     SELECT RAISE(ABORT, 'Cannot add snapshots to an approved payroll period');
 END;
+CREATE TRIGGER IF NOT EXISTS approved_inputs_no_update
+BEFORE UPDATE ON payroll_inputs
+WHEN (SELECT status FROM payroll_periods WHERE id = OLD.period_id) IN ('approved', 'closed')
+BEGIN
+    SELECT RAISE(ABORT, 'Approved payroll inputs are immutable');
+END;
+CREATE TRIGGER IF NOT EXISTS approved_inputs_no_delete
+BEFORE DELETE ON payroll_inputs
+WHEN (SELECT status FROM payroll_periods WHERE id = OLD.period_id) IN ('approved', 'closed')
+BEGIN
+    SELECT RAISE(ABORT, 'Approved payroll inputs are immutable');
+END;
+CREATE TRIGGER IF NOT EXISTS approved_inputs_no_insert
+BEFORE INSERT ON payroll_inputs
+WHEN (SELECT status FROM payroll_periods WHERE id = NEW.period_id) IN ('approved', 'closed')
+BEGIN
+    SELECT RAISE(ABORT, 'Cannot add inputs to an approved payroll period');
+END;
 """
 
 
