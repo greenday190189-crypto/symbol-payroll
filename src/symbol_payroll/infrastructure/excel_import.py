@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 from dataclasses import dataclass
@@ -296,18 +297,23 @@ def apply_import_preview(
                 """INSERT INTO payroll_inputs (
                     period_id, employee_id, shifts, hours, sales, plan, advances,
                     deductions, manual_tax, fixed_adjustments, extra_values_json, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(period_id, employee_id) DO UPDATE SET
                     shifts=excluded.shifts, hours=excluded.hours, sales=excluded.sales,
                     plan=excluded.plan, advances=excluded.advances,
                     deductions=excluded.deductions, manual_tax=excluded.manual_tax,
                     fixed_adjustments=excluded.fixed_adjustments,
-                    extra_values_json='{}', updated_at=excluded.updated_at""",
+                    extra_values_json=excluded.extra_values_json, updated_at=excluded.updated_at""",
                 (
                     item.period_id, item.employee_id, str(item.shifts), str(item.hours),
                     str(item.sales), str(item.plan), str(item.advances),
                     str(item.deductions), str(item.manual_tax),
-                    str(item.fixed_adjustments), now,
+                    str(item.fixed_adjustments),
+                    json.dumps(
+                        {key: str(value) for key, value in item.extra_values.items()},
+                        ensure_ascii=False, sort_keys=True,
+                    ),
+                    now,
                 ),
             )
     return len(prepared)
