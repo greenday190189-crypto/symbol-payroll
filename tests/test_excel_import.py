@@ -12,7 +12,9 @@ from symbol_payroll.infrastructure.excel_import import (
 )
 from symbol_payroll.infrastructure.payroll_repository import create_period
 from symbol_payroll.infrastructure.repositories import create_employee, create_store
-from symbol_payroll.infrastructure.period_inputs import list_period_inputs
+from symbol_payroll.infrastructure.period_inputs import (
+    PeriodEmployeeInput, list_period_inputs, save_period_input,
+)
 
 
 @pytest.fixture
@@ -153,3 +155,28 @@ def test_import_resets_calculated_period_and_removes_old_snapshots(db, tmp_path)
     assert db.execute(
         "SELECT COUNT(*) FROM payroll_snapshots WHERE period_id='2026-10'"
     ).fetchone()[0] == 0
+
+
+
+def test_unmapped_columns_preserve_existing_period_values(db, tmp_path) -> None:
+    save_period_input(
+        db, PeriodEmployeeInput(
+            "2026-10", "e1", shifts=Decimal("4"), hours=Decimal("38"),
+            sales=Decimal("90000"), extra_values={"commission_rate": Decimal("0.03")},
+        )
+    )
+    path = workbook_file(tmp_path, [
+        ["Сотрудник", "Смены"],
+        ["Иванов Иван", 12],
+    ])
+    preview = build_import_preview(
+        db, path, "Сигаево", "s1", 1,
+        suggest_mapping(read_headers(path, "Сигаево")),
+    )
+    assert preview.rows[0].values["hours"] is None
+    apply_import_preview(db, "2026-10", preview)
+    imported = list_period_inputs(db, "2026-10")["e1"]
+    assert imported.shifts == Decimal("12")
+    assert imported.hours == Decimal("38")
+    assert imported.sales == Decimal("90000")
+    assert imported.extra_values["commission_rate"] == Decimal("0.03")
