@@ -188,10 +188,9 @@ def export_period_workbook(
     }.get(period["status"], period["status"].upper())
     summary.append(["Сводная ведомость по сети", period_id, "Статус", status_label])
     summary.append(["Период с", period["period_start"], "по", period["period_end"]])
-    summary.append([])
-    _write_summary_table(summary, records)
-    summary.cell(3, 1, "Сотрудники сети")
+    summary.append(["Сотрудники сети"])
     summary.cell(3, 1).font = Font(bold=True, size=12)
+    _write_summary_table(summary, records)
 
     store_groups: dict[str, list[dict]] = defaultdict(list)
     for record in records:
