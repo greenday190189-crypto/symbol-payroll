@@ -70,4 +70,17 @@ def test_unconfirmed_salary_basis_is_flagged() -> None:
     item = EmployeeInput("x", "X", Decimal("1000"), SalaryBasis.UNCONFIRMED)
     result = calculate_payroll([item])
     assert result.employees[0].gross_total == Decimal("0.00")
+    assert result.employees[0].net_total == Decimal("0.00")
+    assert result.employees[0].components[0].category == "unclassified"
     assert result.warnings
+
+
+def test_net_salary_is_not_misreported_as_gross() -> None:
+    net_employee = EmployeeInput(
+        "net", "Net Employee", Decimal("40000"), SalaryBasis.NET
+    )
+    result = calculate_payroll([net_employee])
+    item = result.employees[0]
+    assert item.gross_total == Decimal("0.00")
+    assert item.net_total == Decimal("40000.00")
+    assert item.components[0].category == "net_salary"
