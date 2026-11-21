@@ -121,3 +121,12 @@ def test_deductions_cannot_exceed_payable_amount() -> None:
                 "a": [PayComponent("advance", "Аванс", Decimal("35000"), "deduction")]
             },
         )
+
+
+def test_automatic_tax_calculator_cannot_return_negative_tax() -> None:
+    with pytest.raises(ValueError, match="НДФЛ не может быть отрицательным"):
+        calculate_payroll(
+            [employee("a")],
+            tax_mode=TaxMode.AUTOMATIC,
+            tax_calculator=lambda person, base: Decimal("-1"),
+        )
