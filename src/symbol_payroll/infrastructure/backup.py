@@ -6,7 +6,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-from symbol_payroll.infrastructure.database import SCHEMA_VERSION, connect
+from symbol_payroll.infrastructure.database import SCHEMA_VERSION
 
 
 def _validate_database(connection: sqlite3.Connection) -> None:
@@ -69,6 +69,27 @@ def validate_backup(source: str | Path) -> None:
         backup.close()
 
 
+def create_daily_backup(
+    connection: sqlite3.Connection, directory: str | Path, retention: int = 30
+) -> Path:
+    """Создаёт одну автоматическую копию в день и хранит последние retention копий."""
+    if retention < 1:
+        raise ValueError("Срок хранения должен быть не меньше одной копии")
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    now = datetime.now()
+    today = now.strftime("%Y%m%d")
+    existing = sorted(directory.glob(f"symbol_payroll_auto_{today}_*.sqlite3"))
+    if existing:
+        return existing[-1]
+    destination = directory / f"symbol_payroll_auto_{today}_{now:%H%M%S}.sqlite3"
+    create_backup(connection, destination)
+    backups = sorted(directory.glob("symbol_payroll_auto_*.sqlite3"))
+    for old in backups[:-retention]:
+        old.unlink(missing_ok=True)
+    return destination
+
+
 def restore_backup(
     connection: sqlite3.Connection,
     source: str | Path,
@@ -76,6 +97,9 @@ def restore_backup(
 ) -> Path:
     """Сначала сохраняет текущую БД, затем проверяет и восстанавливает копию."""
     source = Path(source)
+    database_path = Path(connection.execute("PRAGMA database_list").fetchone()[2])
+    if database_path and source.resolve() == database_path.resolve():
+        raise ValueError("Нельзя восстанавливать базу из самой себя")
     validate_backup(source)
     safety_path = create_backup(connection, safety_backup)
     backup = sqlite3.connect(f"file:{source.resolve().as_posix()}?mode=ro", uri=True)
