@@ -176,9 +176,18 @@ def persist_payroll_result(
             raise ValueError("Нельзя пересчитывать утверждённый или закрытый период")
         connection.execute("DELETE FROM payroll_snapshots WHERE period_id = ?", (period_id,))
         for employee in result.employees:
+            directory = connection.execute(
+                """SELECT e.store_id, e.position, s.name AS store_name
+                   FROM employees e JOIN stores s ON s.id = e.store_id
+                   WHERE e.id = ?""",
+                (employee.employee_id,),
+            ).fetchone()
             snapshot = {
                 "employee_id": employee.employee_id,
                 "full_name": employee.full_name,
+                "store_id": directory["store_id"] if directory else None,
+                "store_name": directory["store_name"] if directory else "",
+                "position": directory["position"] if directory else None,
                 "components": [
                     {
                         "code": line.code,
