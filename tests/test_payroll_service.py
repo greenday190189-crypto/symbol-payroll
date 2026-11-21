@@ -229,3 +229,25 @@ def test_period_cannot_be_approved_with_missing_period_inputs(db) -> None:
 
     with pytest.raises(ValueError, match="Нельзя утвердить ведомость"):
         transition_period(db, "2026-10", "approved")
+
+
+
+def test_new_rule_version_invalidates_calculated_payroll(db) -> None:
+    save_period_input(
+        db, PeriodEmployeeInput("2026-10", "e1", shifts=Decimal("10"))
+    )
+    save_period_input(
+        db, PeriodEmployeeInput("2026-10", "e2", shifts=Decimal("10"))
+    )
+    calculate_period(db, "2026-10")
+    assert len(list_period_snapshots(db, "2026-10")) == 2
+
+    save_rule_version(
+        db, "new_bonus", RuleScope.STORE, "s1",
+        "sales * 0.02", date(2026, 1, 1), category="bonus",
+    )
+
+    assert db.execute(
+        "SELECT status FROM payroll_periods WHERE id='2026-10'"
+    ).fetchone()["status"] == "draft"
+    assert list_period_snapshots(db, "2026-10") == []
