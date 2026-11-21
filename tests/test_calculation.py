@@ -49,7 +49,23 @@ def test_bonus_participants_can_differ_from_recipients() -> None:
         item.employee_id: sum((line.amount for line in item.components if line.code == "pool"), Decimal("0"))
         for item in result.employees
     }
-    assert amounts == {"a": Decimal("450.00"), "b": Decimal("450.00"), "c": Decimal("0")}
+    assert amounts == {"a": Decimal("300.00"), "b": Decimal("300.00"), "c": Decimal("0")}
+
+
+def test_subset_of_recipients_does_not_redistribute_nonrecipients_share() -> None:
+    pool = BonusPool(
+        "pool", "Премия", Decimal("1200"), ("a", "b", "c", "d"),
+        ("a", "b"), AllocationMethod.EQUAL,
+    )
+    result = calculate_payroll(
+        [employee("a"), employee("b"), employee("c"), employee("d")],
+        bonus_pools=[pool],
+    )
+    paid = sum(
+        (line.amount for item in result.employees for line in item.components if line.code == "pool"),
+        Decimal("0"),
+    )
+    assert paid == Decimal("600.00")
 
 
 def test_zero_distribution_base_is_rejected() -> None:
