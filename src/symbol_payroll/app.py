@@ -22,6 +22,8 @@ from symbol_payroll.domain.pay import SalaryBasis
 from symbol_payroll.domain.rules import RuleScope
 from symbol_payroll.domain.tax import TaxMode
 from symbol_payroll.infrastructure.database import connect, initialize
+from symbol_payroll.infrastructure.legacy_import import import_legacy_directory
+from symbol_payroll.legacy_directory_data import LEGACY_DIRECTORY
 from symbol_payroll.infrastructure.backup import (
     create_backup, create_daily_backup, default_backup_name, restore_backup, validate_backup,
 )
@@ -1167,6 +1169,35 @@ def main() -> int:
     ))
     connection = connect(data_dir / "symbol_payroll.sqlite3")
     initialize(connection)
+    directory_count = connection.execute("SELECT COUNT(*) FROM stores").fetchone()[0]
+    employee_count = connection.execute("SELECT COUNT(*) FROM employees").fetchone()[0]
+    if directory_count == 0 and employee_count == 0:
+        answer = QMessageBox.question(
+            None,
+            "Импорт исходной ведомости",
+            "В базе пока нет магазинов и сотрудников. Импортировать справочник из "
+            "переданного Excel-файла?\n\n"
+            "Будут добавлены 8 магазинов и 43 именных записи сотрудников. "
+            "Суммы окладов сохранятся с типом «не определено» — gross/net не угадываем.\n\n"
+            "12 строк с названиями должностей без ФИО останутся для ручной привязки. "
+            "Исторические показатели и формулы Excel не станут автоматическими правилами.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            try:
+                imported = import_legacy_directory(connection)
+                QMessageBox.information(
+                    None,
+                    "Импорт завершён",
+                    f"Добавлено магазинов: {imported['stores']}\\n"
+                    f"Сотрудников: {imported['employees']}\\n"
+                    f"Строк без ФИО для ручной привязки: {imported['role_placeholders']}\\n\\n"
+                    "Проверьте список сотрудников и уточните тип каждого оклада. "
+                    "Правила оплаты из Excel не активированы.",
+                )
+            except Exception as exc:
+                QMessageBox.critical(None, "Ошибка импорта", str(exc))
     try:
         create_daily_backup(connection, data_dir / "backups", retention=30)
     except Exception as exc:
