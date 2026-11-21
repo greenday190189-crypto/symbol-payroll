@@ -263,6 +263,11 @@ def calculate_payroll(
         deductions = money(sum(
             (line.amount for line in lines if line.category == "deduction"), ZERO
         ))
+        payable_before_deductions = money(gross + direct_net)
+        if deductions > payable_before_deductions:
+            raise ValueError(
+                f"Удержания превышают сумму к выплате сотруднику {employee.full_name}"
+            )
         employee_results.append(EmployeeResult(
             employee.employee_id, employee.full_name, tuple(lines), gross, tax,
             deductions, money(gross + direct_net - deductions)
