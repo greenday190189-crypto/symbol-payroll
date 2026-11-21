@@ -5,8 +5,11 @@ import pytest
 
 from symbol_payroll.domain.pay import SalaryBasis
 from symbol_payroll.infrastructure.database import connect, initialize
-from symbol_payroll.infrastructure.payroll_repository import create_period
-from symbol_payroll.infrastructure.repositories import create_employee, create_store
+from symbol_payroll.infrastructure.payroll_repository import create_period, list_period_snapshots
+from symbol_payroll.infrastructure.period_inputs import PeriodEmployeeInput, save_period_input
+from symbol_payroll.infrastructure.repositories import (
+    create_employee, create_store, update_employee,
+)
 from symbol_payroll.services.payroll_service import calculate_period
 from symbol_payroll.services.termination_service import (
     approve_termination_case,
@@ -123,3 +126,34 @@ def test_schema_v3_migrates_to_v4_with_termination_table(db):
         row["name"] for row in db.execute("PRAGMA table_info(termination_cases)")
     }
     assert {"termination_date", "components_json", "result_json", "status"} <= columns
+
+
+
+def test_termination_invalidates_calculated_monthly_payroll(db) -> None:
+    create_period(db, "2026-10", date(2026, 10, 1), date(2026, 10, 31))
+    save_period_input(
+        db, PeriodEmployeeInput("2026-10", "employee-1", shifts=Decimal("12"))
+    )
+    calculate_period(db, "2026-10")
+    assert len(list_period_snapshots(db, "2026-10")) == 1
+
+    create_termination_case(db, "employee-1", date(2026, 10, 15))
+
+    assert db.execute(
+        "SELECT status FROM payroll_periods WHERE id='2026-10'"
+    ).fetchone()["status"] == "draft"
+    assert list_period_snapshots(db, "2026-10") == []
+
+
+def test_terminated_employee_cannot_be_reactivated(db) -> None:
+    create_termination_case(db, "employee-1", date(2026, 10, 15))
+
+    with pytest.raises(ValueError, match="повторно активировать"):
+        update_employee(
+            db, "employee-1", "store-1", "Иванов Иван",
+            position="Продавец", salary_amount=Decimal("90000"),
+            salary_basis=SalaryBasis.GROSS, active=True,
+        )
+
+    with pytest.raises(Exception, match="Terminated employees cannot be reactivated"):
+        db.execute("UPDATE employees SET active=1 WHERE id='employee-1'")
