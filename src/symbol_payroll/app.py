@@ -877,6 +877,7 @@ class TerminationsPage(QWidget):
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setAlternatingRowColors(True)
+        self.table.itemSelectionChanged.connect(self.update_actions)
         self.status = QLabel(
             "Окончательный расчёт вводится отдельно от месячной ведомости. "
             "Проверьте компоненты и НДФЛ до утверждения."
@@ -919,14 +920,16 @@ class TerminationsPage(QWidget):
                     item.setData(Qt.ItemDataRole.UserRole, case["id"])
                 self.table.setItem(row, column, item)
         self.table.resizeColumnsToContents()
-        self.approve_button.setEnabled(False)
-        self.calculate_button.setEnabled(False)
+        self.update_actions()
+
+    def update_actions(self) -> None:
         case_id = self.selected_case_id()
-        if case_id:
-            case = next((item for item in cases if item["id"] == case_id), None)
-            if case:
-                self.calculate_button.setEnabled(case["status"] in ("draft", "calculated"))
-                self.approve_button.setEnabled(case["status"] == "calculated")
+        case = next(
+            (item for item in list_termination_cases(self.connection) if item["id"] == case_id),
+            None,
+        ) if case_id else None
+        self.calculate_button.setEnabled(bool(case and case["status"] in ("draft", "calculated")))
+        self.approve_button.setEnabled(bool(case and case["status"] == "calculated"))
 
     def create_case(self) -> None:
         employees = list_employees(self.connection)
