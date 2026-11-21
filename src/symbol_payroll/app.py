@@ -14,7 +14,7 @@ from PySide6.QtCore import QDate, QStandardPaths, Qt
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDateEdit, QDialog, QDialogButtonBox,
     QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
-    QMessageBox, QPushButton, QSpinBox, QTabWidget, QTableWidget,
+    QMessageBox, QPushButton, QPlainTextEdit, QSpinBox, QTabWidget, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
@@ -106,8 +106,10 @@ class RuleDialog(QDialog):
         ):
             self.scope.addItem(label, value)
         self.scope_id = QLineEdit("*")
-        self.expression = QLineEdit()
+        self.expression = QPlainTextEdit()
         self.expression.setPlaceholderText("Например: salary / 22 * shifts")
+        self.expression.setMinimumHeight(76)
+        self.expression.setToolTip("Формула определяет сумму начисления или удержания. Используйте только переменные из справки ниже.")
         self.title = QLineEdit()
         self.title.setPlaceholderText("Например: Оплата смен")
         self.category = QComboBox()
@@ -132,6 +134,24 @@ class RuleDialog(QDialog):
         form.addRow("Название строки", self.title)
         form.addRow("Категория", self.category)
         form.addRow("Формула", self.expression)
+        formula_help = QLabel(
+            "ДОСТУПНЫЕ ПЕРЕМЕННЫЕ\n"
+            "salary — оклад до НДФЛ (gross); salary_net — оклад на руки (net);\n"
+            "shifts — смены; hours — часы; sales — продажи; plan — план;\n"
+            "advances — аванс; deductions — прочие удержания; manual_tax — ручной НДФЛ;\n"
+            "fixed_adjustments — корректировки. Можно добавлять свои числовые параметры\n"
+            "в таблице расчёта → «Доп. параметры» (например, commission_rate).\n\n"
+            "СИНТАКСИС: числа, имена переменных, скобки и операции +, -, *, /.\n"
+            "Функции, проценты как знак %, степени и Python-код не поддерживаются.\n\n"
+            "ПРИМЕРЫ:\n"
+            "salary / 22 * shifts — оплата пропорционально сменам при делителе 22;\n"
+            "sales * commission_rate — процент от продаж (ставка задаётся отдельно);\n"
+            "(sales - plan) * 0.05 — 5% от превышения плана (только если превышение положительное,\n"
+            "поэтому безопаснее: (sales - plan) * 0.05 нельзя использовать при недовыполнении)."
+        )
+        formula_help.setWordWrap(True)
+        formula_help.setStyleSheet("QLabel { color: #526174; background: #f1f5f9; padding: 10px; border-radius: 8px; }")
+        form.addRow("Как писать формулу", formula_help)
         form.addRow("Действует с", self.start)
         form.addRow(self.end_enabled)
         form.addRow("Действует по", self.end)
@@ -154,7 +174,7 @@ class RuleDialog(QDialog):
             self.code.text().strip(),
             RuleScope(self.scope.currentData()),
             self.scope_id.text().strip(),
-            self.expression.text().strip(),
+            self.expression.toPlainText().strip(),
             self.start.date().toPython(),
             end_date,
             self.category.currentData(),
@@ -530,10 +550,22 @@ class CalculationsPage(QWidget):
         self.input_table.setHorizontalHeaderLabels(
             ["Сотрудник", *(label for label, _ in self.INPUT_COLUMNS)]
         )
-        self.input_table.horizontalHeaderItem(9).setToolTip(
-            'Дополнительные числовые переменные для формул, например: '
-            '{"commission_rate": "0.02", "returns": "1500"}'
-        )
+        input_help = {
+            "Смены": "Фактически отработанные смены за месяц. Используется в формулах, например salary / 22 * shifts.",
+            "Часы": "Фактически отработанные часы за месяц.",
+            "Продажи": "Фактическая выручка сотрудника за месяц, в рублях.",
+            "План": "План продаж сотрудника за месяц, в рублях.",
+            "Аванс": "Уже выплаченная сумма. В расчёте учитывается как удержание из суммы к выплате.",
+            "Удержания": "Прочие подтверждённые удержания. Не вводите сюда аванс или НДФЛ повторно.",
+            "НДФЛ": "Сумма налога, рассчитанная вне приложения или вручную. Автоматический налоговый расчёт пока отключён.",
+            "Корректировка": "Ручная доплата/корректировка. Проверьте её категорию в детализации.",
+            "Доп. параметры (JSON)": 'Дополнительные числовые переменные для формул. Пример: {"commission_rate": "0.02", "returns": "1500"}. В формуле используйте имя без кавычек: sales * commission_rate.',
+        }
+        for index, (label, _) in enumerate(self.INPUT_COLUMNS, start=1):
+            header = self.input_table.horizontalHeaderItem(index)
+            if header:
+                header.setToolTip(input_help[label])
+        self.input_table.verticalHeader().setDefaultSectionSize(30)
         self.input_table.setEditTriggers(QTableWidget.EditTrigger.AllEditTriggers)
         self.input_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
 
@@ -1037,14 +1069,28 @@ class MainWindow(QMainWindow):
         self.connection = connection
         self.database_path = database_path
         self.setWindowTitle("Символ — расчёт заработной платы")
-        self.resize(1180, 760)
-        self.setMinimumSize(900, 600)
+        self.resize(1280, 820)
+        self.setMinimumSize(980, 680)
+        self.setStyleSheet(\"\"\"
+            QWidget { font-size: 10pt; color: #1f2937; }
+            QMainWindow, QDialog { background: #f6f8fb; }
+            QTabWidget::pane { border: 1px solid #dbe3ed; background: #ffffff; border-radius: 10px; top: -1px; }
+            QTabBar::tab { background: #e9eef5; color: #475569; padding: 10px 18px; margin-right: 4px; border-top-left-radius: 7px; border-top-right-radius: 7px; }
+            QTabBar::tab:selected { background: #ffffff; color: #0f172a; font-weight: 600; }
+            QPushButton { background: #e8eef7; border: 1px solid #d3deeb; border-radius: 7px; padding: 8px 13px; min-height: 18px; }
+            QPushButton:hover { background: #dce7f5; }
+            QPushButton:default { background: #2457a6; color: white; }
+            QLineEdit, QComboBox, QDateEdit, QSpinBox, QPlainTextEdit { background: white; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px; selection-background-color: #b9d2f4; }
+            QTableWidget { background: white; alternate-background-color: #f7f9fc; border: 1px solid #dbe3ed; gridline-color: #e5eaf1; border-radius: 8px; }
+            QHeaderView::section { background: #edf2f8; color: #334155; padding: 8px; border: 0; border-bottom: 1px solid #dbe3ed; font-weight: 600; }
+            QLabel { color: #334155; }
+        \"\"\")
         tabs = QTabWidget()
         employee_page = DirectoryPage(connection, employees=True)
-        tabs.addTab(DirectoryPage(connection, employees=False), "Магазины")
-        tabs.addTab(employee_page, "Сотрудники")
-        tabs.addTab(RulesPage(connection), "Правила оплаты")
         tabs.addTab(CalculationsPage(connection), "Расчёты")
+        tabs.addTab(employee_page, "Сотрудники")
+        tabs.addTab(DirectoryPage(connection, employees=False), "Магазины")
+        tabs.addTab(RulesPage(connection), "Правила оплаты")
         tabs.addTab(TerminationsPage(connection, employee_page), "Увольнения")
         backup_button = QPushButton("Создать резервную копию")
         restore_button = QPushButton("Восстановить из копии")
