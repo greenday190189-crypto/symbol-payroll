@@ -30,6 +30,7 @@ from symbol_payroll.infrastructure.period_inputs import (
     PeriodEmployeeInput, list_period_inputs, save_period_input,
 )
 from symbol_payroll.infrastructure.payroll_export import export_period_workbook
+from symbol_payroll.infrastructure.termination_export import export_termination_workbook
 from symbol_payroll.infrastructure.payroll_repository import (
     create_period, list_period_snapshots, list_periods, list_rule_versions,
     save_rule_version, transition_period,
@@ -885,13 +886,16 @@ class TerminationsPage(QWidget):
         self.create_button = QPushButton("Оформить увольнение")
         self.calculate_button = QPushButton("Рассчитать")
         self.approve_button = QPushButton("Утвердить расчёт")
+        self.export_button = QPushButton("Экспорт Excel")
         self.create_button.clicked.connect(self.create_case)
         self.calculate_button.clicked.connect(self.calculate_selected)
         self.approve_button.clicked.connect(self.approve_selected)
+        self.export_button.clicked.connect(self.export_selected)
         actions = QHBoxLayout()
         actions.addWidget(self.create_button)
         actions.addWidget(self.calculate_button)
         actions.addWidget(self.approve_button)
+        actions.addWidget(self.export_button)
         layout = QVBoxLayout(self)
         layout.addWidget(self.status)
         layout.addWidget(self.table)
@@ -930,6 +934,7 @@ class TerminationsPage(QWidget):
         ) if case_id else None
         self.calculate_button.setEnabled(bool(case and case["status"] in ("draft", "calculated")))
         self.approve_button.setEnabled(bool(case and case["status"] == "calculated"))
+        self.export_button.setEnabled(bool(case and case["result_json"]))
 
     def create_case(self) -> None:
         employees = list_employees(self.connection)
@@ -974,6 +979,36 @@ class TerminationsPage(QWidget):
             QMessageBox.warning(self, "Окончательный расчёт не выполнен", str(exc))
         except Exception as exc:
             QMessageBox.critical(self, "Ошибка расчёта увольнения", str(exc))
+
+    def export_selected(self) -> None:
+        case_id = self.selected_case_id()
+        if not case_id:
+            QMessageBox.information(self, "Выберите дело", "Сначала выберите расчёт увольнения.")
+            return
+        case = next(
+            (item for item in list_termination_cases(self.connection) if item["id"] == case_id),
+            None,
+        )
+        if case is None or not case["result_json"]:
+            QMessageBox.information(
+                self, "Нет расчёта", "Сначала выполните и сохраните окончательный расчёт."
+            )
+            return
+        default_name = f"Окончательный_расчёт_{case['termination_date']}_{case['full_name']}.xlsx"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Сохранить окончательный расчёт", default_name, "Excel (*.xlsx)"
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".xlsx"):
+            path += ".xlsx"
+        try:
+            export_termination_workbook(self.connection, case_id, path)
+            self.status.setText(f"Excel-файл сохранён: {path}")
+        except (ValueError, LookupError) as exc:
+            QMessageBox.warning(self, "Не удалось экспортировать расчёт", str(exc))
+        except Exception as exc:
+            QMessageBox.critical(self, "Ошибка экспорта", str(exc))
 
     def approve_selected(self) -> None:
         case_id = self.selected_case_id()
