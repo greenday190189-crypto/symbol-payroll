@@ -10,9 +10,7 @@ from symbol_payroll.infrastructure.excel_import import (
     ColumnMapping, apply_import_preview, build_import_preview, read_headers,
     suggest_mapping,
 )
-from symbol_payroll.infrastructure.payroll_repository import (
-    create_period, list_period_snapshots, persist_payroll_result,
-)
+from symbol_payroll.infrastructure.payroll_repository import create_period
 from symbol_payroll.infrastructure.repositories import create_employee, create_store
 from symbol_payroll.infrastructure.period_inputs import list_period_inputs
 
