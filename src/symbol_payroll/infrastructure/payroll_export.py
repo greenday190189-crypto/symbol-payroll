@@ -84,7 +84,9 @@ def _write_summary_table(sheet: Worksheet, rows: list[dict]) -> None:
 
 def _write_employee_sheet(sheet: Worksheet, snapshot: dict, status: str, period_id: str) -> None:
     sheet.append(["Расчётный листок", period_id, "Статус", status.upper()])
+    sheet.append(["Магазин", snapshot.get("store_name") or "—"])
     sheet.append(["Сотрудник", snapshot.get("full_name", "—")])
+    sheet.append(["Должность", snapshot.get("position") or "—"])
     sheet.append(["ID сотрудника", snapshot.get("employee_id", "—")])
     sheet.append([])
     sheet.append(["Компонент", "Категория", "Сумма, руб."])
@@ -159,8 +161,8 @@ def export_period_workbook(
             raise ValueError(f"Некорректный снимок сотрудника {row['employee_id']}")
         records.append({
             "employee_id": row["employee_id"],
-            "store_id": row["store_id"],
-            "store_name": row["store_name"],
+            "store_id": snapshot.get("store_id") or row["store_id"],
+            "store_name": snapshot.get("store_name") or row["store_name"],
             "snapshot": snapshot,
             "rules_fingerprint": row["rules_fingerprint"],
         })
