@@ -9,7 +9,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QStandardPaths
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout,
+    QApplication, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
     QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QTabWidget,
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
