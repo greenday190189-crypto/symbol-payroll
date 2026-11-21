@@ -99,6 +99,9 @@ def test_terminated_employee_remains_in_historical_period_only(db):
 
     october = calculate_period(db, "2026-10")
     assert [item.employee_id for item in october.employees] == ["employee-1"]
+    assert october.employees[0].gross_total == Decimal("0.00")
+    assert any("полный месячный оклад автоматически не начислен" in warning
+               for warning in october.warnings)
 
     with pytest.raises(ValueError, match="Нет сотрудников"):
         calculate_period(db, "2026-11")
@@ -109,3 +112,14 @@ def test_termination_date_and_component_validation(db):
         create_termination_case(
             db, "employee-1", date(2026, 10, 15), advances=Decimal("-1")
         )
+
+
+
+def test_schema_v3_migrates_to_v4_with_termination_table(db):
+    db.execute("UPDATE schema_meta SET version=3")
+    initialize(db)
+    assert db.execute("SELECT version FROM schema_meta").fetchone()["version"] == 4
+    columns = {
+        row["name"] for row in db.execute("PRAGMA table_info(termination_cases)")
+    }
+    assert {"termination_date", "components_json", "result_json", "status"} <= columns
