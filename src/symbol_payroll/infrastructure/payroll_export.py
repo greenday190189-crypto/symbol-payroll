@@ -125,6 +125,9 @@ def _write_employee_sheet(sheet: Worksheet, snapshot: dict, status: str, period_
     for cell in sheet[1]:
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill("solid", fgColor="263B53")
+    for cell in sheet[7]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="46627F")
     for row in sheet.iter_rows(min_row=8, min_col=3, max_col=3):
         for cell in row:
             cell.number_format = '#,##0.00;[Red]-#,##0.00'
