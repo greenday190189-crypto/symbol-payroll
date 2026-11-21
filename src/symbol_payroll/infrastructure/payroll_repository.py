@@ -144,3 +144,79 @@ def transition_period(
             "UPDATE payroll_periods SET status = ?, approved_at = COALESCE(?, approved_at) WHERE id = ?",
             (target_status, approved_at, period_id),
         )
+
+
+def persist_payroll_result(
+    connection: sqlite3.Connection,
+    period_id: str,
+    result,
+    rule_versions: list[str],
+) -> None:
+    """Атомарно сохраняет полный результат расчёта как черновые снимки периода.
+
+    Повторный расчёт draft/calculated периода заменяет предыдущий набор снимков.
+    После утверждения эта операция запрещена.
+    """
+    fingerprint_source = json.dumps(sorted(rule_versions), separators=(",", ":"))
+    fingerprint = hashlib.sha256(fingerprint_source.encode("utf-8")).hexdigest()
+    with connection:
+        period = connection.execute(
+            "SELECT status FROM payroll_periods WHERE id = ?", (period_id,)
+        ).fetchone()
+        if period is None:
+            raise LookupError(f"Расчётный период не найден: {period_id}")
+        if period["status"] not in ("draft", "calculated"):
+            raise ValueError("Нельзя пересчитывать утверждённый или закрытый период")
+        connection.execute("DELETE FROM payroll_snapshots WHERE period_id = ?", (period_id,))
+        for employee in result.employees:
+            snapshot = {
+                "employee_id": employee.employee_id,
+                "full_name": employee.full_name,
+                "components": [
+                    {
+                        "code": line.code,
+                        "title": line.title,
+                        "amount": str(line.amount),
+                        "category": line.category,
+                    }
+                    for line in employee.components
+                ],
+                "gross_total": str(employee.gross_total),
+                "tax_amount": str(employee.tax_amount),
+                "deduction_total": str(employee.deduction_total),
+                "net_total": str(employee.net_total),
+                "warnings": list(result.warnings),
+            }
+            payload = json.dumps(
+                snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            )
+            connection.execute(
+                """INSERT INTO payroll_snapshots
+                   (id, period_id, employee_id, snapshot_json, rules_fingerprint, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (str(uuid4()), period_id, employee.employee_id, payload, fingerprint, _now()),
+            )
+        if period["status"] == "draft":
+            connection.execute(
+                "UPDATE payroll_periods SET status = 'calculated' WHERE id = ?",
+                (period_id,),
+            )
+
+
+def list_period_snapshots(
+    connection: sqlite3.Connection, period_id: str
+) -> list[dict]:
+    """Возвращает сохранённые снимки с восстановленным JSON-представлением."""
+    return [
+        {
+            "employee_id": row["employee_id"],
+            "snapshot": json.loads(row["snapshot_json"]),
+            "rules_fingerprint": row["rules_fingerprint"],
+            "created_at": row["created_at"],
+        }
+        for row in connection.execute(
+            """SELECT employee_id, snapshot_json, rules_fingerprint, created_at
+               FROM payroll_snapshots WHERE period_id = ? ORDER BY employee_id""",
+            (period_id,),
+        )
+    ]
