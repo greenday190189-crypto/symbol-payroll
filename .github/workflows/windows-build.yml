@@ -1,0 +1,42 @@
+name: Windows application build
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Build portable application
+        shell: pwsh
+        run: ./packaging/build_windows.ps1
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iscc = "$env:ProgramFiles(x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "Inno Setup compiler not found" }
+          & $iscc packaging\SymbolPayroll.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
+      - name: Upload Windows distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: SymbolPayroll-Windows
+          path: |
+            dist/SymbolPayroll/
+            dist/installer/*.exe
+          if-no-files-found: error
+          retention-days: 30
