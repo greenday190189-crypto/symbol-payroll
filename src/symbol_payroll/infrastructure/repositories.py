@@ -59,10 +59,10 @@ def create_employee(
     name = full_name.strip()
     if not name:
         raise ValueError("ФИО сотрудника не может быть пустым")
-    if salary_amount is not None and salary_amount < 0:
-        raise ValueError("Сумма оклада не может быть отрицательной")
     if salary_amount is not None and not isinstance(salary_amount, Decimal):
         raise TypeError("Оклад должен передаваться как Decimal")
+    if salary_amount is not None and salary_amount < 0:
+        raise ValueError("Сумма оклада не может быть отрицательной")
     amount_text = str(salary_amount) if salary_amount is not None else None
     normalized_position = position.strip() if position and position.strip() else None
     with connection:
