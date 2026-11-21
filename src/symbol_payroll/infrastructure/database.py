@@ -3,7 +3,7 @@
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -30,6 +30,9 @@ CREATE TABLE IF NOT EXISTS payroll_rules (
     scope TEXT NOT NULL CHECK (scope IN ('organization','store','position','employee','period')),
     scope_id TEXT NOT NULL,
     expression TEXT NOT NULL,
+    category TEXT NOT NULL DEFAULT 'earning'
+        CHECK (category IN ('earning','bonus','net_salary','deduction','unclassified')),
+    title TEXT NOT NULL DEFAULT '',
     version INTEGER NOT NULL CHECK (version > 0),
     effective_from TEXT NOT NULL,
     effective_to TEXT,
@@ -43,6 +46,21 @@ CREATE TABLE IF NOT EXISTS payroll_periods (
     status TEXT NOT NULL CHECK (status IN ('draft','calculated','approved','closed')),
     created_at TEXT NOT NULL,
     approved_at TEXT
+);
+CREATE TABLE IF NOT EXISTS payroll_inputs (
+    period_id TEXT NOT NULL REFERENCES payroll_periods(id),
+    employee_id TEXT NOT NULL REFERENCES employees(id),
+    shifts TEXT NOT NULL DEFAULT '0',
+    hours TEXT NOT NULL DEFAULT '0',
+    sales TEXT NOT NULL DEFAULT '0',
+    plan TEXT NOT NULL DEFAULT '0',
+    advances TEXT NOT NULL DEFAULT '0',
+    deductions TEXT NOT NULL DEFAULT '0',
+    manual_tax TEXT NOT NULL DEFAULT '0',
+    fixed_adjustments TEXT NOT NULL DEFAULT '0',
+    extra_values_json TEXT NOT NULL DEFAULT '{}',
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(period_id, employee_id)
 );
 CREATE TABLE IF NOT EXISTS payroll_snapshots (
     id TEXT PRIMARY KEY,
@@ -100,6 +118,60 @@ def initialize(connection: sqlite3.Connection) -> None:
         if row is None:
             connection.execute("INSERT INTO schema_meta(version) VALUES (?)", (SCHEMA_VERSION,))
         elif row["version"] == 1:
+            columns = {item["name"] for item in connection.execute("PRAGMA table_info(payroll_rules)")}
+            if "category" not in columns:
+                connection.execute(
+                    "ALTER TABLE payroll_rules ADD COLUMN category TEXT NOT NULL DEFAULT 'earning'"
+                )
+            if "title" not in columns:
+                connection.execute(
+                    "ALTER TABLE payroll_rules ADD COLUMN title TEXT NOT NULL DEFAULT ''"
+                )
+            connection.execute(
+                """CREATE TABLE IF NOT EXISTS payroll_inputs (
+                    period_id TEXT NOT NULL REFERENCES payroll_periods(id),
+                    employee_id TEXT NOT NULL REFERENCES employees(id),
+                    shifts TEXT NOT NULL DEFAULT '0',
+                    hours TEXT NOT NULL DEFAULT '0',
+                    sales TEXT NOT NULL DEFAULT '0',
+                    plan TEXT NOT NULL DEFAULT '0',
+                    advances TEXT NOT NULL DEFAULT '0',
+                    deductions TEXT NOT NULL DEFAULT '0',
+                    manual_tax TEXT NOT NULL DEFAULT '0',
+                    fixed_adjustments TEXT NOT NULL DEFAULT '0',
+                    extra_values_json TEXT NOT NULL DEFAULT '{}',
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(period_id, employee_id)
+                )"""
+            )
+            connection.execute("UPDATE schema_meta SET version = ?", (SCHEMA_VERSION,))
+        elif row["version"] == 2:
+            columns = {item["name"] for item in connection.execute("PRAGMA table_info(payroll_rules)")}
+            if "category" not in columns:
+                connection.execute(
+                    "ALTER TABLE payroll_rules ADD COLUMN category TEXT NOT NULL DEFAULT 'earning'"
+                )
+            if "title" not in columns:
+                connection.execute(
+                    "ALTER TABLE payroll_rules ADD COLUMN title TEXT NOT NULL DEFAULT ''"
+                )
+            connection.execute(
+                """CREATE TABLE IF NOT EXISTS payroll_inputs (
+                    period_id TEXT NOT NULL REFERENCES payroll_periods(id),
+                    employee_id TEXT NOT NULL REFERENCES employees(id),
+                    shifts TEXT NOT NULL DEFAULT '0',
+                    hours TEXT NOT NULL DEFAULT '0',
+                    sales TEXT NOT NULL DEFAULT '0',
+                    plan TEXT NOT NULL DEFAULT '0',
+                    advances TEXT NOT NULL DEFAULT '0',
+                    deductions TEXT NOT NULL DEFAULT '0',
+                    manual_tax TEXT NOT NULL DEFAULT '0',
+                    fixed_adjustments TEXT NOT NULL DEFAULT '0',
+                    extra_values_json TEXT NOT NULL DEFAULT '{}',
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(period_id, employee_id)
+                )"""
+            )
             connection.execute("UPDATE schema_meta SET version = ?", (SCHEMA_VERSION,))
         elif row["version"] != SCHEMA_VERSION:
             raise RuntimeError(
