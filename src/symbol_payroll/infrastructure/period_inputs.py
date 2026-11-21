@@ -62,6 +62,14 @@ def save_period_input(
             raise LookupError(f"Расчётный период не найден: {item.period_id}")
         if period["status"] not in ("draft", "calculated"):
             raise ValueError("Нельзя изменять вводные данные утверждённого периода")
+        if period["status"] == "calculated":
+            # Any edit invalidates the previous result; stale snapshots must never be approved.
+            connection.execute(
+                "DELETE FROM payroll_snapshots WHERE period_id = ?", (item.period_id,)
+            )
+            connection.execute(
+                "UPDATE payroll_periods SET status = 'draft' WHERE id = ?", (item.period_id,)
+            )
         employee = connection.execute(
             "SELECT id FROM employees WHERE id = ?", (item.employee_id,)
         ).fetchone()
