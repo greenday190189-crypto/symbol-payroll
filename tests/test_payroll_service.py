@@ -161,3 +161,31 @@ def test_editing_inputs_invalidates_previous_calculation(db) -> None:
     assert db.execute(
         "SELECT status FROM payroll_periods WHERE id='2026-10'"
     ).fetchone()["status"] == "draft"
+
+
+
+def test_custom_period_variables_are_available_to_payroll_rules(db) -> None:
+    save_rule_version(
+        db, "custom_bonus", RuleScope.EMPLOYEE, "e1",
+        "sales * commission_rate", date(2026, 1, 1),
+        category="bonus", title="Индивидуальная комиссия",
+    )
+    save_period_input(
+        db, PeriodEmployeeInput(
+            "2026-10", "e1", sales=Decimal("100000"),
+            extra_values={"commission_rate": Decimal("0.025")},
+        )
+    )
+    result = calculate_period(db, "2026-10")
+    first = next(item for item in result.employees if item.employee_id == "e1")
+    bonus = next(line for line in first.components if line.code == "custom_bonus")
+    assert bonus.amount == Decimal("2500.00")
+
+
+def test_custom_variables_cannot_override_standard_inputs(db) -> None:
+    with pytest.raises(ValueError, match="не может переопределять salary"):
+        save_period_input(
+            db, PeriodEmployeeInput(
+                "2026-10", "e1", extra_values={"salary": Decimal("999999")}
+            )
+        )
