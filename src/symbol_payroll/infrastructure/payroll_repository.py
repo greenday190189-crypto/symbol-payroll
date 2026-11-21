@@ -32,10 +32,14 @@ def save_rule_version(
     expression: str,
     effective_from: date,
     effective_to: date | None = None,
+    category: str = "earning",
+    title: str = "",
 ) -> PayrollRule:
     """Создаёт новую версию правила, не перезаписывая старую."""
     if not code.strip() or not scope_id.strip() or not expression.strip():
         raise ValueError("Код, область действия и выражение правила обязательны")
+    if category not in {"earning", "bonus", "net_salary", "deduction", "unclassified"}:
+        raise ValueError(f"Недопустимая категория правила: {category}")
     if effective_to is not None and effective_to < effective_from:
         raise ValueError("Дата окончания правила раньше даты начала")
     with connection:
@@ -47,12 +51,15 @@ def save_rule_version(
         version = int(row["version"]) + 1
         connection.execute(
             """INSERT INTO payroll_rules
-               (id, code, scope, scope_id, expression, version, effective_from, effective_to)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (str(uuid4()), code, scope.value, scope_id, expression, version,
+               (id, code, scope, scope_id, expression, category, title, version, effective_from, effective_to)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (str(uuid4()), code, scope.value, scope_id, expression, category, title or code, version,
              effective_from.isoformat(), effective_to.isoformat() if effective_to else None),
         )
-    return PayrollRule(code, scope, scope_id, expression, version, effective_from, effective_to)
+    return PayrollRule(
+        code, scope, scope_id, expression, version, effective_from, effective_to,
+        True, category, title or code,
+    )
 
 
 def list_rule_versions(
@@ -69,7 +76,7 @@ def list_rule_versions(
             row["code"], RuleScope(row["scope"]), row["scope_id"], row["expression"],
             row["version"], date.fromisoformat(row["effective_from"]),
             date.fromisoformat(row["effective_to"]) if row["effective_to"] else None,
-            bool(row["enabled"]),
+            bool(row["enabled"]), row["category"], row["title"],
         )
         for row in connection.execute(query, params)
     ]
