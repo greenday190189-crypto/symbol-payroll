@@ -35,6 +35,10 @@ from symbol_payroll.infrastructure.payroll_repository import (
     save_rule_version, transition_period,
 )
 from symbol_payroll.services.payroll_service import calculate_period
+from symbol_payroll.services.termination_service import (
+    approve_termination_case, calculate_termination_case,
+    create_termination_case, list_termination_cases,
+)
 from symbol_payroll.infrastructure.repositories import (
     create_employee, create_store, list_employees, list_stores,
 )
@@ -793,6 +797,199 @@ class CalculationsPage(QWidget):
             QMessageBox.critical(self, "Не удалось утвердить ведомость", str(exc))
 
 
+class TerminationDialog(QDialog):
+    def __init__(self, employees, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Оформить увольнение")
+        self.resize(620, 520)
+        self.employee = QComboBox()
+        for employee in employees:
+            self.employee.addItem(
+                f"{employee.full_name} — {employee.position or 'должность не указана'}",
+                employee.id,
+            )
+        self.termination_date = QDateEdit(QDate.currentDate())
+        self.termination_date.setCalendarPopup(True)
+        self.shifts = QLineEdit("0")
+        self.hours = QLineEdit("0")
+        self.advances = QLineEdit("0")
+        self.deductions = QLineEdit("0")
+        self.tax = QLineEdit("0")
+        self.components = QLineEdit("[]")
+        self.components.setPlaceholderText(
+            '[{"code":"final_salary","title":"Оплата фактически отработанного времени",'
+            '"amount":"30000","category":"earning"}]'
+        )
+        self.notes = QLineEdit()
+        form = QFormLayout(self)
+        form.addRow("Сотрудник", self.employee)
+        form.addRow("Дата увольнения", self.termination_date)
+        form.addRow("Фактически отработано смен", self.shifts)
+        form.addRow("Фактически отработано часов", self.hours)
+        form.addRow("Ранее выплаченные авансы", self.advances)
+        form.addRow("Прочие удержания", self.deductions)
+        form.addRow("НДФЛ (ручное значение)", self.tax)
+        form.addRow("Окончательные начисления (JSON)", self.components)
+        form.addRow("Примечание", self.notes)
+        hint = QLabel(
+            "Укажите начисления отдельными строками JSON. Категории: earning, bonus, "
+            "net_salary, deduction, unclassified. Полный оклад и компенсация отпуска "
+            "автоматически не добавляются."
+        )
+        hint.setWordWrap(True)
+        form.addRow(hint)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        form.addRow(buttons)
+
+    def values(self):
+        def amount(field: QLineEdit) -> Decimal:
+            return Decimal(field.text().strip().replace(" ", "").replace(",", ".") or "0")
+        components = json.loads(self.components.text().strip() or "[]")
+        if not isinstance(components, list):
+            raise ValueError("Окончательные начисления должны быть JSON-массивом")
+        return {
+            "employee_id": self.employee.currentData(),
+            "termination_date": self.termination_date.date().toPython(),
+            "worked_shifts": amount(self.shifts),
+            "worked_hours": amount(self.hours),
+            "advances": amount(self.advances),
+            "other_deductions": amount(self.deductions),
+            "manual_tax": amount(self.tax),
+            "components": components,
+            "notes": self.notes.text(),
+        }
+
+
+class TerminationsPage(QWidget):
+    def __init__(self, connection, employee_directory: DirectoryPage) -> None:
+        super().__init__()
+        self.connection = connection
+        self.employee_directory = employee_directory
+        self.table = QTableWidget()
+        self.table.setColumnCount(6)
+        self.table.setHorizontalHeaderLabels([
+            "Сотрудник", "Магазин", "Дата увольнения", "Статус", "К выплате", "ID дела",
+        ])
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setAlternatingRowColors(True)
+        self.status = QLabel(
+            "Окончательный расчёт вводится отдельно от месячной ведомости. "
+            "Проверьте компоненты и НДФЛ до утверждения."
+        )
+        self.create_button = QPushButton("Оформить увольнение")
+        self.calculate_button = QPushButton("Рассчитать")
+        self.approve_button = QPushButton("Утвердить расчёт")
+        self.create_button.clicked.connect(self.create_case)
+        self.calculate_button.clicked.connect(self.calculate_selected)
+        self.approve_button.clicked.connect(self.approve_selected)
+        actions = QHBoxLayout()
+        actions.addWidget(self.create_button)
+        actions.addWidget(self.calculate_button)
+        actions.addWidget(self.approve_button)
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.status)
+        layout.addWidget(self.table)
+        layout.addLayout(actions)
+        self.refresh()
+
+    def selected_case_id(self) -> str | None:
+        row = self.table.currentRow()
+        if row < 0:
+            return None
+        item = self.table.item(row, 0)
+        return item.data(Qt.ItemDataRole.UserRole) if item else None
+
+    def refresh(self) -> None:
+        cases = list_termination_cases(self.connection)
+        self.table.setRowCount(len(cases))
+        for row, case in enumerate(cases):
+            result = json.loads(case["result_json"]) if case["result_json"] else {}
+            values = [
+                case["full_name"], case["store_name"], case["termination_date"],
+                case["status"], result.get("net_total", "—"), case["id"],
+            ]
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(str(value))
+                if column == 0:
+                    item.setData(Qt.ItemDataRole.UserRole, case["id"])
+                self.table.setItem(row, column, item)
+        self.table.resizeColumnsToContents()
+        self.approve_button.setEnabled(False)
+        self.calculate_button.setEnabled(False)
+        case_id = self.selected_case_id()
+        if case_id:
+            case = next((item for item in cases if item["id"] == case_id), None)
+            if case:
+                self.calculate_button.setEnabled(case["status"] in ("draft", "calculated"))
+                self.approve_button.setEnabled(case["status"] == "calculated")
+
+    def create_case(self) -> None:
+        employees = list_employees(self.connection)
+        if not employees:
+            QMessageBox.information(
+                self, "Нет активных сотрудников",
+                "Нет сотрудников, для которых можно оформить увольнение.",
+            )
+            return
+        dialog = TerminationDialog(employees, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        try:
+            values = dialog.values()
+            create_termination_case(self.connection, **values)
+            self.employee_directory.refresh()
+            self.refresh()
+            self.status.setText(
+                "Увольнение зарегистрировано. Сотрудник исключён из будущих периодов; "
+                "месяц увольнения остаётся доступен для расчёта фактического времени."
+            )
+        except (ValueError, ArithmeticError, LookupError, json.JSONDecodeError) as exc:
+            QMessageBox.warning(self, "Проверьте данные увольнения", str(exc))
+        except Exception as exc:
+            QMessageBox.critical(self, "Не удалось оформить увольнение", str(exc))
+
+    def calculate_selected(self) -> None:
+        case_id = self.selected_case_id()
+        if not case_id:
+            QMessageBox.information(self, "Выберите дело", "Сначала выберите сотрудника.")
+            return
+        try:
+            result = calculate_termination_case(self.connection, case_id)
+            self.refresh()
+            self.status.setText(
+                f"Расчёт сохранён: начислено {result['gross_total']} руб.; "
+                f"НДФЛ {result['tax_amount']} руб.; удержания "
+                f"{result['deduction_total']} руб.; к выплате {result['net_total']} руб.\n"
+                f"{result['calculation_note']}"
+            )
+        except (ValueError, ArithmeticError, LookupError) as exc:
+            QMessageBox.warning(self, "Окончательный расчёт не выполнен", str(exc))
+        except Exception as exc:
+            QMessageBox.critical(self, "Ошибка расчёта увольнения", str(exc))
+
+    def approve_selected(self) -> None:
+        case_id = self.selected_case_id()
+        if not case_id:
+            return
+        answer = QMessageBox.question(
+            self, "Утверждение окончательного расчёта",
+            "Утвердить окончательный расчёт? После утверждения его данные будут неизменяемыми.",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            approve_termination_case(self.connection, case_id)
+            self.refresh()
+            self.status.setText("Окончательный расчёт утверждён и защищён от изменений.")
+        except Exception as exc:
+            QMessageBox.critical(self, "Не удалось утвердить расчёт", str(exc))
+
+
 class MainWindow(QMainWindow):
     def __init__(self, connection) -> None:
         super().__init__()
@@ -800,10 +997,12 @@ class MainWindow(QMainWindow):
         self.resize(1180, 760)
         self.setMinimumSize(900, 600)
         tabs = QTabWidget()
+        employee_page = DirectoryPage(connection, employees=True)
         tabs.addTab(DirectoryPage(connection, employees=False), "Магазины")
-        tabs.addTab(DirectoryPage(connection, employees=True), "Сотрудники")
+        tabs.addTab(employee_page, "Сотрудники")
         tabs.addTab(RulesPage(connection), "Правила оплаты")
         tabs.addTab(CalculationsPage(connection), "Расчёты")
+        tabs.addTab(TerminationsPage(connection, employee_page), "Увольнения")
         self.setCentralWidget(tabs)
 
 
