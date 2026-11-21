@@ -124,9 +124,13 @@ def test_deductions_cannot_exceed_payable_amount() -> None:
 
 
 def test_automatic_tax_calculator_cannot_return_negative_tax() -> None:
+    class NegativeTax:
+        def calculate(self, person, taxable_base):
+            return Decimal("-1")
+
     with pytest.raises(ValueError, match="НДФЛ не может быть отрицательным"):
         calculate_payroll(
             [employee("a")],
             tax_mode=TaxMode.AUTOMATIC,
-            tax_calculator=lambda person, base: Decimal("-1"),
+            tax_calculator=NegativeTax(),
         )
