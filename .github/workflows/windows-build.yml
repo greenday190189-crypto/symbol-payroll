@@ -32,6 +32,31 @@ jobs:
           if (-not (Test-Path $iscc)) { throw "Inno Setup compiler not found" }
           & $iscc packaging\SymbolPayroll.iss
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
+      - name: Smoke test installed application
+        shell: pwsh
+        run: |
+          $installer = (Resolve-Path "dist/installer/SymbolPayroll-Setup-0.1.0.exe").Path
+          $installDir = Join-Path $env:RUNNER_TEMP "SymbolPayroll-Smoke"
+          $install = Start-Process -FilePath $installer -ArgumentList @(
+            "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/DIR=$installDir"
+          ) -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Installer exited with code $($install.ExitCode)" }
+
+          $appExe = Join-Path $installDir "SymbolPayroll.exe"
+          if (-not (Test-Path $appExe)) { throw "Installed application executable not found" }
+          $app = Start-Process -FilePath $appExe -PassThru
+          Start-Sleep -Seconds 8
+          $app.Refresh()
+          if ($app.HasExited) { throw "Application exited during startup (code $($app.ExitCode))" }
+          Stop-Process -Id $app.Id -Force
+
+          $uninstaller = Join-Path $installDir "unins000.exe"
+          if (-not (Test-Path $uninstaller)) { throw "Uninstaller not found" }
+          $uninstall = Start-Process -FilePath $uninstaller -ArgumentList @(
+            "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
+          ) -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) { throw "Uninstaller exited with code $($uninstall.ExitCode)" }
+          if (Test-Path $appExe) { throw "Application files remain after uninstall" }
       - name: Upload Windows distribution
         uses: actions/upload-artifact@v4
         with:
