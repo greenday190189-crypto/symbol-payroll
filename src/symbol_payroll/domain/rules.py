@@ -31,6 +31,8 @@ class PayrollRule:
     effective_from: date
     effective_to: date | None = None
     enabled: bool = True
+    category: str = "earning"
+    title: str = ""
 
     def applies_on(self, day: date) -> bool:
         return self.enabled and self.effective_from <= day and (
