@@ -38,9 +38,9 @@ def test_rule_versions_are_appended_not_overwritten(db) -> None:
 
 def test_approved_snapshots_cannot_be_changed(db) -> None:
     create_period(db, "p1", date(2026, 10, 1), date(2026, 10, 31))
-    with pytest.raises(ValueError, match="без сохранённых"):
-        transition_period(db, "p1", "calculated")
     transition_period(db, "p1", "calculated")
+    with pytest.raises(ValueError, match="без сохранённых"):
+        transition_period(db, "p1", "approved")
     save_employee_snapshot(
         db, "p1", "e1", {"gross": "42000.00", "net": "36540.00"}, ["base_pay:v1"]
     )
