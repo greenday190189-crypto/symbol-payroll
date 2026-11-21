@@ -46,9 +46,23 @@ def calculate_period(
     if period["status"] not in ("draft", "calculated"):
         raise ValueError("Можно рассчитывать только черновой или рассчитанный период")
     calculation_day = date.fromisoformat(period["period_start"])
-    employees = list_employees(connection)
+    # Сотрудник с оформленным увольнением остаётся в ведомостях периодов,
+    # которые начались не позднее даты увольнения. В более поздние периоды он не попадает.
+    all_people = list_employees(connection, include_inactive=True)
+    terminations = {
+        row["employee_id"]: date.fromisoformat(row["termination_date"])
+        for row in connection.execute(
+            "SELECT employee_id, termination_date FROM termination_cases"
+        )
+    }
+    employees = [
+        person for person in all_people
+        if person.active or (
+            person.id in terminations and terminations[person.id] >= date.fromisoformat(period["period_start"])
+        )
+    ]
     if not employees:
-        raise ValueError("Нет активных сотрудников для расчёта")
+        raise ValueError("Нет сотрудников, подлежащих расчёту за выбранный период")
 
     inputs = list_period_inputs(connection, period_id)
     rules = list_rule_versions(connection)
