@@ -21,10 +21,11 @@ from PySide6.QtWidgets import (
 from symbol_payroll.domain.pay import SalaryBasis
 from symbol_payroll.domain.rules import RuleScope
 from symbol_payroll.domain.tax import TaxMode
-from symbol_payroll.infrastructure.database import connect, initialize
+from symbol_payroll.infrastructure.database import SCHEMA_VERSION, connect, initialize
 from symbol_payroll.infrastructure.legacy_import import import_legacy_directory
 from symbol_payroll.infrastructure.backup import (
-    create_backup, create_daily_backup, default_backup_name, restore_backup, validate_backup,
+    create_backup, create_daily_backup, create_pre_migration_backup,
+    default_backup_name, restore_backup, validate_backup,
 )
 from symbol_payroll.infrastructure.excel_import import (
     FIELD_LABELS, ColumnMapping, apply_import_preview, build_import_preview,
@@ -1385,8 +1386,49 @@ def main() -> int:
     data_dir = Path(QStandardPaths.writableLocation(
         QStandardPaths.StandardLocation.AppDataLocation
     ))
-    connection = connect(data_dir / "symbol_payroll.sqlite3")
-    initialize(connection)
+    database_path = data_dir / "symbol_payroll.sqlite3"
+    connection = connect(database_path)
+
+    migration_backup = None
+    try:
+        schema_meta = connection.execute("PRAGMA table_info(schema_meta)").fetchall()
+        if schema_meta:
+            version_row = connection.execute(
+                "SELECT version FROM schema_meta LIMIT 1"
+            ).fetchone()
+            if version_row is not None:
+                stored_version = int(version_row["version"])
+                if stored_version < SCHEMA_VERSION:
+                    migration_backup = create_pre_migration_backup(
+                        connection, data_dir / "backups", stored_version, retention=30
+                    )
+        initialize(connection)
+    except Exception as exc:
+        QMessageBox.critical(
+            None,
+            "Не удалось безопасно открыть базу",
+            "Миграция базы не выполнена. Приложение не будет продолжать работу, "
+            "чтобы не рисковать данными.\n\n"
+            f"Причина: {exc}\n\n"
+            + (
+                f"Предмиграционная копия: {migration_backup}"
+                if migration_backup else
+                "Предмиграционная копия не была создана."
+            ),
+        )
+        connection.close()
+        return 1
+
+    if migration_backup is not None:
+        QMessageBox.information(
+            None,
+            "Резервная копия перед обновлением",
+            "Старая база сохранена до изменения структуры:\n"
+            f"{migration_backup}\n\n"
+            "Эта копия сохраняет прежнюю версию схемы и предназначена для аварийного "
+            "возврата к предыдущей версии приложения.",
+        )
+
     directory_count = connection.execute("SELECT COUNT(*) FROM stores").fetchone()[0]
     employee_count = connection.execute("SELECT COUNT(*) FROM employees").fetchone()[0]
     if directory_count == 0 and employee_count == 0:
@@ -1423,7 +1465,7 @@ def main() -> int:
             None, "Не удалось создать автоматическую копию",
             f"Приложение продолжит работу, но резервная копия не создана:\n{exc}",
         )
-    window = MainWindow(connection, data_dir / "symbol_payroll.sqlite3")
+    window = MainWindow(connection, database_path)
     window.show()
     result = app.exec()
     connection.close()
