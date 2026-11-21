@@ -22,6 +22,9 @@ from symbol_payroll.domain.pay import SalaryBasis
 from symbol_payroll.domain.rules import RuleScope
 from symbol_payroll.domain.tax import TaxMode
 from symbol_payroll.infrastructure.database import connect, initialize
+from symbol_payroll.infrastructure.backup import (
+    create_backup, default_backup_name, restore_backup, validate_backup,
+)
 from symbol_payroll.infrastructure.excel_import import (
     FIELD_LABELS, ColumnMapping, apply_import_preview, build_import_preview,
     list_workbook_sheets, read_headers, suggest_mapping,
@@ -1029,8 +1032,10 @@ class TerminationsPage(QWidget):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, connection) -> None:
+    def __init__(self, connection, database_path: Path) -> None:
         super().__init__()
+        self.connection = connection
+        self.database_path = database_path
         self.setWindowTitle("Символ — расчёт заработной платы")
         self.resize(1180, 760)
         self.setMinimumSize(900, 600)
@@ -1041,7 +1046,76 @@ class MainWindow(QMainWindow):
         tabs.addTab(RulesPage(connection), "Правила оплаты")
         tabs.addTab(CalculationsPage(connection), "Расчёты")
         tabs.addTab(TerminationsPage(connection, employee_page), "Увольнения")
-        self.setCentralWidget(tabs)
+        backup_button = QPushButton("Создать резервную копию")
+        restore_button = QPushButton("Восстановить из копии")
+        backup_button.clicked.connect(self.create_backup_dialog)
+        restore_button.clicked.connect(self.restore_backup_dialog)
+        backup_bar = QHBoxLayout()
+        backup_bar.addWidget(backup_button)
+        backup_bar.addWidget(restore_button)
+        backup_bar.addStretch(1)
+        root = QVBoxLayout()
+        root.addLayout(backup_bar)
+        root.addWidget(tabs)
+        container = QWidget()
+        container.setLayout(root)
+        self.setCentralWidget(container)
+
+    def create_backup_dialog(self) -> None:
+        default_path = self.database_path.parent / "backups" / default_backup_name()
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Создать резервную копию", str(default_path), "SQLite (*.sqlite3)"
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".sqlite3"):
+            path += ".sqlite3"
+        try:
+            create_backup(self.connection, path)
+            QMessageBox.information(
+                self, "Резервная копия создана",
+                f"Копия создана и проверена:
+{path}",
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, "Ошибка резервного копирования", str(exc))
+
+    def restore_backup_dialog(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Выбрать резервную копию", str(self.database_path.parent),
+            "SQLite (*.sqlite3 *.db);;Все файлы (*)",
+        )
+        if not path:
+            return
+        try:
+            validate_backup(path)
+        except Exception as exc:
+            QMessageBox.critical(self, "Резервная копия не прошла проверку", str(exc))
+            return
+        answer = QMessageBox.warning(
+            self, "Подтверждение восстановления",
+            "Текущая база будет заменена выбранной копией. Перед восстановлением "
+            "автоматически создаётся страховочная копия текущей базы. Продолжить?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        safety_path = self.database_path.parent / "backups" / (
+            "before_restore_" + default_backup_name()
+        )
+        try:
+            restore_backup(self.connection, path, safety_path)
+            QMessageBox.information(
+                self, "Восстановление завершено",
+                "База восстановлена. Страховочная копия текущего состояния:
+"
+                f"{safety_path}
+
+Перезапустите приложение, чтобы обновить все открытые данные.",
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, "Ошибка восстановления", str(exc))
 
 
 def main() -> int:
@@ -1052,7 +1126,7 @@ def main() -> int:
     ))
     connection = connect(data_dir / "symbol_payroll.sqlite3")
     initialize(connection)
-    window = MainWindow(connection)
+    window = MainWindow(connection, data_dir / "symbol_payroll.sqlite3")
     window.show()
     result = app.exec()
     connection.close()
