@@ -92,9 +92,9 @@ class EmployeeDialog(QDialog):
         self.salary_effective_from = QDateEdit(QDate.currentDate())
         self.salary_effective_from.setCalendarPopup(True)
         self.salary_date_confirmed = QCheckBox("Дата начала действия оклада подтверждена")
-        self.salary_date_confirmed.setChecked(
-            employee is None or employee.salary_effective_from is not None
-        )
+        # For edits, a new effective date must be deliberately confirmed.
+        # The date editor defaults to today rather than reusing the prior rate's date.
+        self.salary_date_confirmed.setChecked(employee is None)
 
         form = QFormLayout(self)
         form.addRow("Магазин", self.store)
@@ -119,17 +119,10 @@ class EmployeeDialog(QDialog):
                 self.hired_on.setDate(QDate(
                     employee.hired_on.year, employee.hired_on.month, employee.hired_on.day
                 ))
-            if employee.salary_effective_from is not None:
-                self.salary_effective_from.setDate(QDate(
-                    employee.salary_effective_from.year,
-                    employee.salary_effective_from.month,
-                    employee.salary_effective_from.day,
-                ))
-
         help_text = QLabel(
-            "При изменении оклада создаётся новая версия ставки с указанной датой. "
-            "Старые версии не перезаписываются. Для импортированных сотрудников "
-            "подтвердите реальные даты — приложение не угадывает их по ведомости."
+            "При изменении оклада создаётся новая версия ставки. Укажите фактическую "
+            "дату начала действия; по умолчанию стоит сегодня, но она сохраняется "
+            "только после подтверждения. Старые версии не перезаписываются."
         )
         help_text.setWordWrap(True)
         form.addRow(help_text)
