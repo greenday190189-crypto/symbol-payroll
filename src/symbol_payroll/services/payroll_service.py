@@ -10,7 +10,6 @@ from symbol_payroll.domain.calculation import (
     EmployeeInput, PayComponent, calculate_payroll,
 )
 from symbol_payroll.domain.pay import SalaryBasis
-from symbol_payroll.domain.rules import RuleScope
 from symbol_payroll.domain.tax import TaxMode
 from symbol_payroll.infrastructure.period_inputs import (
     PeriodEmployeeInput, list_period_inputs,
