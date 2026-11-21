@@ -116,3 +116,40 @@ def test_import_rejects_approved_period(db, tmp_path) -> None:
     db.execute("UPDATE payroll_periods SET status='approved' WHERE id='2026-10'")
     with pytest.raises(ValueError, match="утверждённый"):
         apply_import_preview(db, "2026-10", preview)
+
+
+
+def test_formula_without_cached_result_is_rejected(db, tmp_path) -> None:
+    path = workbook_file(tmp_path, [
+        ["Сотрудник", "Смены"],
+        ["Иванов Иван", "=1+2"],
+    ])
+    preview = build_import_preview(
+        db, path, "Сигаево", "s1", 1,
+        suggest_mapping(read_headers(path, "Сигаево")),
+    )
+    assert any("не содержит сохранённого результата" in error for error in preview.errors)
+
+
+def test_import_resets_calculated_period_and_removes_old_snapshots(db, tmp_path) -> None:
+    path = workbook_file(tmp_path, [
+        ["Сотрудник", "Смены"],
+        ["Иванов Иван", 9],
+    ])
+    preview = build_import_preview(
+        db, path, "Сигаево", "s1", 1,
+        suggest_mapping(read_headers(path, "Сигаево")),
+    )
+    db.execute("UPDATE payroll_periods SET status='calculated' WHERE id='2026-10'")
+    db.execute(
+        """INSERT INTO payroll_snapshots
+           (id, period_id, employee_id, snapshot_json, rules_fingerprint, created_at)
+           VALUES ('snap1', '2026-10', 'e1', '{}', 'old', '2026-10-31T00:00:00Z')"""
+    )
+    assert apply_import_preview(db, "2026-10", preview) == 1
+    assert db.execute(
+        "SELECT status FROM payroll_periods WHERE id='2026-10'"
+    ).fetchone()["status"] == "draft"
+    assert db.execute(
+        "SELECT COUNT(*) FROM payroll_snapshots WHERE period_id='2026-10'"
+    ).fetchone()[0] == 0
