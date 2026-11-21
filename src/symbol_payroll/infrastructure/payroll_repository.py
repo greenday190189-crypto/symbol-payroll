@@ -76,7 +76,7 @@ def list_rule_versions(
             row["code"], RuleScope(row["scope"]), row["scope_id"], row["expression"],
             row["version"], date.fromisoformat(row["effective_from"]),
             date.fromisoformat(row["effective_to"]) if row["effective_to"] else None,
-            bool(row["enabled"]), row["category"], row["title"],
+            bool(row["enabled"]), row["category"], row["title"] or row["code"],
         )
         for row in connection.execute(query, params)
     ]
