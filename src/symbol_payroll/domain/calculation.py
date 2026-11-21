@@ -256,6 +256,8 @@ def calculate_payroll(
             tax = money(employee.manual_tax)
         else:
             tax = ZERO
+        if tax < ZERO:
+            raise ValueError(f"НДФЛ не может быть отрицательным: {employee.full_name}")
         if tax > gross:
             raise ValueError(f"НДФЛ превышает начисления сотрудника {employee.full_name}")
         if tax:
