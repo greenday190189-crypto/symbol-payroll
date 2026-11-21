@@ -43,7 +43,6 @@ def _sheet_title(value: str, used: set[str]) -> str:
 
 
 def _style_sheet(sheet: Worksheet) -> None:
-    sheet.freeze_panes = "A4"
     sheet.sheet_view.showGridLines = False
     for cell in sheet[1]:
         cell.font = Font(bold=True, color="FFFFFF")
@@ -57,7 +56,13 @@ def _style_sheet(sheet: Worksheet) -> None:
 
 
 def _write_summary_table(sheet: Worksheet, rows: list[dict]) -> None:
+    header_row = sheet.max_row + 1
+    first_data_row = header_row + 1
     sheet.append(list(HEADERS))
+    sheet.freeze_panes = f"A{first_data_row}"
+    for cell in sheet[header_row]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="46627F")
     for row in rows:
         snap = row["snapshot"]
         sheet.append([
@@ -72,11 +77,11 @@ def _write_summary_table(sheet: Worksheet, rows: list[dict]) -> None:
         sheet.cell(total_row, 1, "ИТОГО")
         for col in range(2, 6):
             letter = get_column_letter(col)
-            sheet.cell(total_row, col, f"=SUM({letter}2:{letter}{total_row - 1})")
+            sheet.cell(total_row, col, f"=SUM({letter}{first_data_row}:{letter}{total_row - 1})")
         for cell in sheet[total_row]:
             cell.font = Font(bold=True)
             cell.fill = PatternFill("solid", fgColor="DCE6F1")
-    for row in sheet.iter_rows(min_row=2, min_col=2, max_col=5):
+    for row in sheet.iter_rows(min_row=first_data_row, max_row=sheet.max_row, min_col=2, max_col=5):
         for cell in row:
             cell.number_format = '#,##0.00;[Red]-#,##0.00'
     _style_sheet(sheet)
@@ -113,14 +118,14 @@ def _write_employee_sheet(sheet: Worksheet, snapshot: dict, status: str, period_
         for warning in warnings:
             sheet.append([str(warning)])
     sheet.sheet_view.showGridLines = False
-    sheet.freeze_panes = "A5"
+    sheet.freeze_panes = "A8"
     sheet.column_dimensions["A"].width = 38
     sheet.column_dimensions["B"].width = 24
     sheet.column_dimensions["C"].width = 20
     for cell in sheet[1]:
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill("solid", fgColor="263B53")
-    for row in sheet.iter_rows(min_row=6, min_col=3, max_col=3):
+    for row in sheet.iter_rows(min_row=8, min_col=3, max_col=3):
         for cell in row:
             cell.number_format = '#,##0.00;[Red]-#,##0.00'
     for row in sheet.iter_rows():
@@ -182,9 +187,8 @@ def export_period_workbook(
     summary.append(["Период с", period["period_start"], "по", period["period_end"]])
     summary.append([])
     _write_summary_table(summary, records)
-    summary.insert_rows(4)
-    summary.cell(4, 1, "Сотрудники сети")
-    summary.cell(4, 1).font = Font(bold=True, size=12)
+    summary.cell(3, 1, "Сотрудники сети")
+    summary.cell(3, 1).font = Font(bold=True, size=12)
 
     store_groups: dict[str, list[dict]] = defaultdict(list)
     for record in records:
@@ -205,9 +209,8 @@ def export_period_workbook(
         sheet = workbook.create_sheet(_sheet_title(store_name, used_titles))
         sheet.append([f"Ведомость магазина: {store_name}", period_id, "Статус", status_label])
         sheet.append([])
-        _write_summary_table(sheet, group)
-        sheet.insert_rows(2)
         sheet.cell(2, 1, f"Магазин: {store_name}")
+        _write_summary_table(sheet, group)
     for row in store_summary.iter_rows(min_row=2, min_col=3, max_col=6):
         for cell in row:
             cell.number_format = '#,##0.00;[Red]-#,##0.00'
