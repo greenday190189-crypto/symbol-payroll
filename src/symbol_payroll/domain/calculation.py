@@ -16,6 +16,7 @@ from symbol_payroll.domain.tax import TaxMode
 
 CENT = Decimal("0.01")
 ZERO = Decimal("0")
+COMPONENT_CATEGORIES = {"earning", "bonus", "net_salary", "deduction", "unclassified"}
 
 
 def money(value: Decimal) -> Decimal:
@@ -98,6 +99,7 @@ class EmployeeResult:
     components: tuple[PayComponent, ...]
     gross_total: Decimal
     tax_amount: Decimal
+    deduction_total: Decimal
     net_total: Decimal
 
 
@@ -106,6 +108,7 @@ class PayrollResult:
     employees: tuple[EmployeeResult, ...]
     total_gross: Decimal
     total_tax: Decimal
+    total_deductions: Decimal
     total_net: Decimal
     warnings: tuple[str, ...]
 
@@ -175,6 +178,10 @@ def calculate_payroll(
         for component in employee_components:
             if component.amount < ZERO:
                 raise ValueError(f"Компонент {component.code}: сумма не может быть отрицательной")
+            if component.category not in COMPONENT_CATEGORIES:
+                raise ValueError(
+                    f"Компонент {component.code}: неизвестная категория {component.category}"
+                )
             result_components[employee_id].append(component)
 
     for employee in employees:
@@ -251,15 +258,21 @@ def calculate_payroll(
             tax = ZERO
         if tax > gross:
             raise ValueError(f"НДФЛ превышает начисления сотрудника {employee.full_name}")
+        if tax:
+            lines.append(PayComponent("income_tax", "НДФЛ", tax, "deduction"))
+        deductions = money(sum(
+            (line.amount for line in lines if line.category == "deduction"), ZERO
+        ))
         employee_results.append(EmployeeResult(
             employee.employee_id, employee.full_name, tuple(lines), gross, tax,
-            money(gross - tax + direct_net)
+            deductions, money(gross + direct_net - deductions)
         ))
 
     return PayrollResult(
         tuple(employee_results),
         money(sum((item.gross_total for item in employee_results), ZERO)),
         money(sum((item.tax_amount for item in employee_results), ZERO)),
+        money(sum((item.deduction_total for item in employee_results), ZERO)),
         money(sum((item.net_total for item in employee_results), ZERO)),
         tuple(warnings),
     )
