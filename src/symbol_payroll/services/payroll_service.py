@@ -45,6 +45,7 @@ def calculate_period(
         raise LookupError(f"Расчётный период не найден: {period_id}")
     if period["status"] not in ("draft", "calculated"):
         raise ValueError("Можно рассчитывать только черновой или рассчитанный период")
+    period_start = date.fromisoformat(period["period_start"])
     calculation_day = period_start
     # Сотрудник с оформленным увольнением остаётся в ведомостях периодов,
     # которые начались не позднее даты увольнения. В более поздние периоды он не попадает.
@@ -55,7 +56,6 @@ def calculate_period(
             "SELECT employee_id, termination_date FROM termination_cases"
         )
     }
-    period_start = date.fromisoformat(period["period_start"])
     employees = []
     for person in all_people:
         termination_date = terminations.get(person.id)
