@@ -111,3 +111,13 @@ def test_automatic_tax_rejects_net_salary_until_gross_up_exists() -> None:
             [net_employee], tax_mode=TaxMode.AUTOMATIC,
             tax_calculator=lambda employee, base: Decimal("0"),
         )
+
+
+def test_deductions_cannot_exceed_payable_amount() -> None:
+    with pytest.raises(ValueError, match="Удержания превышают"):
+        calculate_payroll(
+            [employee("a")],
+            components={
+                "a": [PayComponent("advance", "Аванс", Decimal("35000"), "deduction")]
+            },
+        )
