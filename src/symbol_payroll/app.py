@@ -146,8 +146,7 @@ class RuleDialog(QDialog):
             "ПРИМЕРЫ:\n"
             "salary / 22 * shifts — оплата пропорционально сменам при делителе 22;\n"
             "sales * commission_rate — процент от продаж (ставка задаётся отдельно);\n"
-            "(sales - plan) * 0.05 — 5% от превышения плана (только если превышение положительное,\n"
-            "поэтому безопаснее: (sales - plan) * 0.05 нельзя использовать при недовыполнении)."
+            "sales * 0.03 — 3% от продаж; 0.03 — это 3%, знак процента не пишется."
         )
         formula_help.setWordWrap(True)
         formula_help.setStyleSheet("QLabel { color: #526174; background: #f1f5f9; padding: 10px; border-radius: 8px; }")
