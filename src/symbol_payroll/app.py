@@ -93,6 +93,15 @@ class RuleDialog(QDialog):
         self.scope_id = QLineEdit("*")
         self.expression = QLineEdit()
         self.expression.setPlaceholderText("Например: salary / 22 * shifts")
+        self.title = QLineEdit()
+        self.title.setPlaceholderText("Например: Оплата смен")
+        self.category = QComboBox()
+        for label, value in (
+            ("Начисление", "earning"), ("Премия", "bonus"),
+            ("Сумма на руки", "net_salary"), ("Удержание", "deduction"),
+            ("Не классифицировано", "unclassified"),
+        ):
+            self.category.addItem(label, value)
         self.start = QDateEdit(QDate.currentDate())
         self.start.setCalendarPopup(True)
         self.end_enabled = QCheckBox("Ограничить дату окончания")
@@ -105,6 +114,8 @@ class RuleDialog(QDialog):
         form.addRow("Код показателя", self.code)
         form.addRow("Область действия", self.scope)
         form.addRow("Идентификатор области", self.scope_id)
+        form.addRow("Название строки", self.title)
+        form.addRow("Категория", self.category)
         form.addRow("Формула", self.expression)
         form.addRow("Действует с", self.start)
         form.addRow(self.end_enabled)
@@ -131,6 +142,8 @@ class RuleDialog(QDialog):
             self.expression.text().strip(),
             self.start.date().toPython(),
             end_date,
+            self.category.currentData(),
+            self.title.text().strip(),
         )
 
 
@@ -223,14 +236,14 @@ class RulesPage(QWidget):
 
     def refresh(self) -> None:
         rules = list_rule_versions(self.connection)
-        headers = ["Показатель", "Область", "ID области", "Формула", "Версия", "С", "По"]
+        headers = ["Показатель", "Название", "Категория", "Область", "ID области", "Формула", "Версия", "С", "По"]
         self.table.setColumnCount(len(headers))
         self.table.setHorizontalHeaderLabels(headers)
         self.table.setRowCount(len(rules))
         for row, rule in enumerate(rules):
             values = [
-                rule.code, rule.scope.value, rule.scope_id, rule.expression,
-                str(rule.version), rule.effective_from.isoformat(),
+                rule.code, rule.title, rule.category, rule.scope.value,
+                rule.scope_id, rule.expression, str(rule.version), rule.effective_from.isoformat(),
                 rule.effective_to.isoformat() if rule.effective_to else "Без срока",
             ]
             for col, value in enumerate(values):
@@ -242,9 +255,10 @@ class RulesPage(QWidget):
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         try:
-            code, scope, scope_id, expression, start, end = dialog.values()
+            code, scope, scope_id, expression, start, end, category, title = dialog.values()
             save_rule_version(
-                self.connection, code, scope, scope_id, expression, start, end
+                self.connection, code, scope, scope_id, expression, start, end,
+                category=category, title=title,
             )
             self.refresh()
         except (ValueError, ArithmeticError) as exc:
