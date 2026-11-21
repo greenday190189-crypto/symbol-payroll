@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import uuid
 from datetime import date, datetime, timezone
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
@@ -286,7 +287,7 @@ def update_employee(
                 "При изменении оклада или gross/net укажите дату начала действия новой ставки"
             )
 
-        latest_rate = _latest_salary_rate(connection, employee_id)
+        salary_history_changed = False
         if salary_effective_from is not None:
             matching = connection.execute(
                 """SELECT id FROM employee_salary_history
@@ -305,8 +306,7 @@ def update_employee(
                 _insert_salary_rate(
                     connection, employee_id, salary_amount, salary_basis, salary_effective_from
                 )
-        elif salary_changed and latest_rate is None and salary_amount is not None:
-            raise ValueError("Для нового оклада нужна дата начала действия")
+                salary_history_changed = True
 
         connection.execute(
             """UPDATE employees
@@ -344,6 +344,7 @@ def update_employee(
             or existing["full_name"] != name
             or existing["position"] != normalized_position
             or salary_changed
+            or salary_history_changed
             or existing["salary_basis"] != salary_basis.value
             or bool(existing["active"]) != active
             or (effective_hire_date.isoformat() if effective_hire_date else None) != existing["hired_on"]
@@ -351,13 +352,11 @@ def update_employee(
         if changed:
             invalidate_calculated_periods(connection)
 
-    return list_employees(connection, include_inactive=True)[
-        next(
-            index for index, item in enumerate(
-                list_employees(connection, include_inactive=True)
-            ) if item.id == employee_id
-        )
-    ]
+    updated = next(
+        item for item in list_employees(connection, include_inactive=True)
+        if item.id == employee_id
+    )
+    return updated
 
 
 def list_employees(
