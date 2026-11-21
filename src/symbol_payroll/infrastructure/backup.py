@@ -148,8 +148,14 @@ def create_daily_backup(
     now = datetime.now()
     today = now.strftime("%Y%m%d")
     existing = sorted(directory.glob(f"symbol_payroll_auto_{today}_*.sqlite3"))
-    if existing:
-        return existing[-1]
+    for candidate in reversed(existing):
+        try:
+            validate_backup(candidate)
+        except (OSError, sqlite3.DatabaseError, ValueError):
+            # A same-day copy from an older schema (or a damaged copy) must
+            # not prevent a fresh backup after a database migration.
+            continue
+        return candidate
     destination = directory / f"symbol_payroll_auto_{today}_{now:%H%M%S}.sqlite3"
     create_backup(connection, destination)
     backups = sorted(directory.glob("symbol_payroll_auto_*.sqlite3"))
