@@ -29,6 +29,7 @@ from symbol_payroll.infrastructure.excel_import import (
 from symbol_payroll.infrastructure.period_inputs import (
     PeriodEmployeeInput, list_period_inputs, save_period_input,
 )
+from symbol_payroll.infrastructure.payroll_export import export_period_workbook
 from symbol_payroll.infrastructure.payroll_repository import (
     create_period, list_period_snapshots, list_periods, list_rule_versions,
     save_rule_version, transition_period,
@@ -482,6 +483,9 @@ class CalculationsPage(QWidget):
         self.save_button.clicked.connect(self.save_inputs)
         self.import_button = QPushButton("Импорт Excel")
         self.import_button.clicked.connect(self.import_excel)
+        self.export_button = QPushButton("Экспорт Excel")
+        self.export_button.clicked.connect(self.export_excel)
+        self.export_button.setEnabled(False)
         self.tax_mode = QComboBox()
         self.tax_mode.addItem("НДФЛ не рассчитывать", TaxMode.DISABLED.value)
         self.tax_mode.addItem("НДФЛ введён вручную", TaxMode.MANUAL.value)
@@ -506,6 +510,7 @@ class CalculationsPage(QWidget):
         actions = QHBoxLayout()
         actions.addWidget(self.save_button)
         actions.addWidget(self.import_button)
+        actions.addWidget(self.export_button)
         actions.addWidget(QLabel("Режим НДФЛ:"))
         actions.addWidget(self.tax_mode)
         actions.addWidget(self.calculate_button)
@@ -577,6 +582,7 @@ class CalculationsPage(QWidget):
         if not period_id:
             self.status.setText("Создайте расчётный месяц.")
             self.set_editable(False)
+            self.export_button.setEnabled(False)
             return
         period = self.connection.execute(
             "SELECT status FROM payroll_periods WHERE id = ?", (period_id,)
@@ -741,6 +747,31 @@ class CalculationsPage(QWidget):
             "SELECT status FROM payroll_periods WHERE id = ?", (period_id,)
         ).fetchone()["status"]
         self.approve_button.setEnabled(status == "calculated" and bool(snapshots))
+        self.export_button.setEnabled(bool(snapshots))
+
+    def export_excel(self) -> None:
+        period_id = self.period.currentData()
+        if not period_id:
+            return
+        default_name = f"Ведомость_{period_id}.xlsx"
+        destination, _ = QFileDialog.getSaveFileName(
+            self, "Сохранить расчётную ведомость",
+            str(Path.home() / default_name),
+            "Книга Excel (*.xlsx)",
+        )
+        if not destination:
+            return
+        if not destination.lower().endswith(".xlsx"):
+            destination += ".xlsx"
+        try:
+            path = export_period_workbook(self.connection, period_id, destination)
+            QMessageBox.information(
+                self, "Экспорт завершён",
+                f"Ведомость сохранена:\\n{path}\\n\\n"
+                "Файл сформирован из сохранённых снимков без повторного расчёта.",
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, "Не удалось экспортировать ведомость", str(exc))
 
     def approve_period(self) -> None:
         period_id = self.period.currentData()
