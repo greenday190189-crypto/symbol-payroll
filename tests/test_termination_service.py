@@ -27,6 +27,8 @@ def db(tmp_path):
         connection, "employee-1", "store-1", "Иванов Иван",
         position="Продавец", salary_amount=Decimal("90000"),
         salary_basis=SalaryBasis.GROSS,
+        hired_on=date(2020, 1, 1),
+        salary_effective_from=date(2020, 1, 1),
     )
     yield connection
     connection.close()
@@ -121,7 +123,7 @@ def test_termination_date_and_component_validation(db):
 def test_schema_v3_migrates_to_v4_with_termination_table(db):
     db.execute("UPDATE schema_meta SET version=3")
     initialize(db)
-    assert db.execute("SELECT version FROM schema_meta").fetchone()["version"] == 4
+    assert db.execute("SELECT version FROM schema_meta").fetchone()["version"] == 5
     columns = {
         row["name"] for row in db.execute("PRAGMA table_info(termination_cases)")
     }
@@ -157,3 +159,11 @@ def test_terminated_employee_cannot_be_reactivated(db) -> None:
 
     with pytest.raises(Exception, match="Terminated employees cannot be reactivated"):
         db.execute("UPDATE employees SET active=1 WHERE id='employee-1'")
+
+
+
+def test_hire_date_is_persisted_in_termination_snapshot_history(db) -> None:
+    employee = db.execute(
+        "SELECT hired_on FROM employees WHERE id='employee-1'"
+    ).fetchone()
+    assert employee["hired_on"] == "2020-01-01"
