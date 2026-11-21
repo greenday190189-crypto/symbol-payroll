@@ -10,7 +10,7 @@ AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
 DefaultDirName={autopf}\Symbol Payroll
 DefaultGroupName=Символ
-OutputDir=dist\installer
+OutputDir=..\dist\installer
 OutputBaseFilename=SymbolPayroll-Setup-{#AppVersion}
 Compression=lzma2
 SolidCompression=yes
@@ -23,7 +23,7 @@ UninstallDisplayIcon={app}\{#AppExeName}
 Name: "desktopicon"; Description: "Создать ярлык на рабочем столе"; GroupDescription: "Дополнительные значки:"; Flags: unchecked
 
 [Files]
-Source: "dist\SymbolPayroll\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\dist\SymbolPayroll\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\Символ"; Filename: "{app}\{#AppExeName}"
