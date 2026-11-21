@@ -1074,8 +1074,7 @@ class MainWindow(QMainWindow):
             create_backup(self.connection, path)
             QMessageBox.information(
                 self, "Резервная копия создана",
-                f"Копия создана и проверена:
-{path}",
+                f"Копия создана и проверена:\n{path}",
             )
         except Exception as exc:
             QMessageBox.critical(self, "Ошибка резервного копирования", str(exc))
@@ -1108,11 +1107,8 @@ class MainWindow(QMainWindow):
             restore_backup(self.connection, path, safety_path)
             QMessageBox.information(
                 self, "Восстановление завершено",
-                "База восстановлена. Страховочная копия текущего состояния:
-"
-                f"{safety_path}
-
-Перезапустите приложение, чтобы обновить все открытые данные.",
+                "База восстановлена. Страховочная копия текущего состояния:\n"
+                f"{safety_path}\n\nПерезапустите приложение, чтобы обновить все открытые данные.",
             )
         except Exception as exc:
             QMessageBox.critical(self, "Ошибка восстановления", str(exc))
