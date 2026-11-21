@@ -300,6 +300,27 @@ def update_employee(
             and salary_effective_from < effective_hire_date
         ):
             raise ValueError("Дата начала оклада не может быть раньше даты приёма")
+        if effective_hire_date is not None:
+            termination = connection.execute(
+                "SELECT termination_date FROM termination_cases WHERE employee_id = ?",
+                (employee_id,),
+            ).fetchone()
+            if (
+                termination is not None
+                and date.fromisoformat(termination["termination_date"]) < effective_hire_date
+            ):
+                raise ValueError("Дата приёма не может быть позже даты оформленного увольнения")
+            earlier_rate = connection.execute(
+                """SELECT MIN(effective_from) AS first_rate
+                   FROM employee_salary_history
+                   WHERE employee_id = ? AND effective_from < ?""",
+                (employee_id, effective_hire_date.isoformat()),
+            ).fetchone()["first_rate"]
+            if earlier_rate is not None:
+                raise ValueError(
+                    "В истории оклада есть ставка раньше даты приёма; "
+                    "проверьте даты приёма и действия ставок"
+                )
 
         old_amount = (
             Decimal(existing["salary_amount"])
