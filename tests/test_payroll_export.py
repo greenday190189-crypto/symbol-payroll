@@ -59,8 +59,8 @@ def test_export_contains_network_store_and_personal_sheets(db, tmp_path) -> None
     assert any(name.startswith("Петров Пётр") for name in workbook.sheetnames)
     summary = workbook["Сводная"]
     assert summary["D1"].value == "УТВЕРЖДЕНО"
-    assert summary["B5"].value == 50000.0
-    assert summary["B6"].value == 40000.0
+    assert summary["B5"].value == 40000.0
+    assert summary["B6"].value == 50000.0
     assert summary["B7"].value == "=SUM(B5:B6)"
     assert workbook["По магазинам"]["A2"].value == "Дачная"
     assert workbook["По магазинам"]["C2"].value == 40000.0
