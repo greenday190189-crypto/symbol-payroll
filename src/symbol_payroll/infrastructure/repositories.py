@@ -75,13 +75,13 @@ def create_employee(
             (employee_id, store_id, name, normalized_position, amount_text, salary_basis.value),
         )
         # A new employee changes the population of every unapproved payroll.
-        _invalidate_calculated_periods(connection)
+        invalidate_calculated_periods(connection)
     return EmployeeRecord(
         employee_id, store_id, name, normalized_position, True, salary_amount, salary_basis
     )
 
 
-def _invalidate_calculated_periods(connection: sqlite3.Connection) -> None:
+def invalidate_calculated_periods(connection: sqlite3.Connection) -> None:
     """Return unapproved calculated periods to draft after directory changes."""
     connection.execute(
         """DELETE FROM payroll_snapshots
@@ -127,6 +127,12 @@ def update_employee(
         ).fetchone()
         if existing is None:
             raise LookupError(f"Сотрудник не найден: {employee_id}")
+        if active and connection.execute(
+            "SELECT 1 FROM termination_cases WHERE employee_id = ?", (employee_id,)
+        ).fetchone():
+            raise ValueError(
+                "Нельзя повторно активировать сотрудника с оформленным увольнением"
+            )
 
         old_amount = (
             Decimal(existing["salary_amount"])
@@ -154,7 +160,7 @@ def update_employee(
             # Employee data is not effective-dated. Any unapproved calculation
             # may contain stale directory data, so it must be recalculated.
             # Approved and closed snapshots remain immutable and untouched.
-            _invalidate_calculated_periods(connection)
+            invalidate_calculated_periods(connection)
 
     return EmployeeRecord(
         employee_id, store_id, name, normalized_position, active,
@@ -203,9 +209,15 @@ def set_employee_active(
         ).fetchone()
         if row is None:
             raise LookupError(f"Сотрудник не найден: {employee_id}")
+        if active and connection.execute(
+            "SELECT 1 FROM termination_cases WHERE employee_id = ?", (employee_id,)
+        ).fetchone():
+            raise ValueError(
+                "Нельзя повторно активировать сотрудника с оформленным увольнением"
+            )
         if bool(row["active"]) == active:
             return
         connection.execute(
             "UPDATE employees SET active = ? WHERE id = ?", (int(active), employee_id)
         )
-        _invalidate_calculated_periods(connection)
+        invalidate_calculated_periods(connection)
