@@ -168,10 +168,12 @@ def build_import_preview(
         by_name.setdefault(normalized, []).append(employee["id"])
 
     workbook = load_workbook(path, read_only=True, data_only=True)
+    formula_workbook = load_workbook(path, read_only=True, data_only=False)
     try:
         if sheet_name not in workbook.sheetnames:
             raise ValueError(f"Лист не найден: {sheet_name}")
         sheet = workbook[sheet_name]
+        formula_sheet = formula_workbook[sheet_name]
         rows: list[ImportPreviewRow] = []
         seen: set[str] = set()
         for row_number, raw_row in enumerate(
@@ -204,6 +206,15 @@ def build_import_preview(
             for field in NUMERIC_FIELDS:
                 index = getattr(mapping, field)
                 raw_value = raw_row[index] if index is not None and index < len(raw_row) else None
+                if index is not None:
+                    formula_cell = formula_sheet.cell(row_number, index + 1)
+                    if formula_cell.data_type == "f" and raw_value is None:
+                        errors.append(
+                            f"Строка {row_number}: формула в поле «{FIELD_LABELS[field]}» "
+                            "не содержит сохранённого результата. Пересохраните файл в Excel."
+                        )
+                        values[field] = Decimal("0")
+                        continue
                 try:
                     values[field] = _decimal_value(raw_value, field, row_number)
                 except ValueError as exc:
@@ -217,6 +228,7 @@ def build_import_preview(
         return ExcelImportPreview(sheet_name, store_id, tuple(rows))
     finally:
         workbook.close()
+        formula_workbook.close()
 
 
 def apply_import_preview(
