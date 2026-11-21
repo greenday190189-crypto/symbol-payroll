@@ -24,6 +24,12 @@ def test_legacy_directory_imports_stores_and_employees_with_unconfirmed_salary_b
     assert connection.execute(
         "SELECT COUNT(*) FROM employees WHERE salary_amount IS NOT NULL"
     ).fetchone()[0] == 43
+    assert connection.execute(
+        "SELECT COUNT(*) FROM employee_salary_history WHERE effective_from IS NULL"
+    ).fetchone()[0] == 43
+    assert connection.execute(
+        "SELECT COUNT(*) FROM employees WHERE hired_on IS NULL"
+    ).fetchone()[0] == 43
 
 
 def test_legacy_import_refuses_non_empty_directory_without_partial_writes():

@@ -133,6 +133,11 @@ _APPROVAL_BLOCKING_WARNING_MARKERS = (
     "тип оклада gross/net не определён",
     "вводные показатели за период не заполнены",
     "увольнение внутри периода; полный месячный оклад автоматически не начислен",
+    "дата приёма не подтверждена",
+    "сотрудник принят в течение периода",
+    "дата начала действия оклада не подтверждена",
+    "начинает действовать",
+    "нет ставки оклада, действующей в расчётном периоде",
 )
 
 
@@ -208,6 +213,7 @@ def persist_payroll_result(
     period_id: str,
     result,
     rule_versions: list[str],
+    employee_metadata: dict[str, dict] | None = None,
 ) -> None:
     """Атомарно сохраняет полный результат расчёта как черновые снимки периода.
 
@@ -238,6 +244,7 @@ def persist_payroll_result(
                 "store_id": directory["store_id"] if directory else None,
                 "store_name": directory["store_name"] if directory else "",
                 "position": directory["position"] if directory else None,
+                "employment": (employee_metadata or {}).get(employee.employee_id, {}),
                 "components": [
                     {
                         "code": line.code,

@@ -75,12 +75,14 @@ def create_termination_case(
     }
     normalized = _normalize_components(components or [])
     employee = connection.execute(
-        "SELECT id, active FROM employees WHERE id = ?", (employee_id,)
+        "SELECT id, active, hired_on FROM employees WHERE id = ?", (employee_id,)
     ).fetchone()
     if employee is None:
         raise LookupError(f"Сотрудник не найден: {employee_id}")
     if not employee["active"]:
         raise ValueError("Нельзя оформить увольнение: сотрудник уже неактивен")
+    if employee["hired_on"] and termination_date < date.fromisoformat(employee["hired_on"]):
+        raise ValueError("Дата увольнения не может быть раньше даты приёма")
     case_id = str(uuid4())
     now = _now()
     with connection:

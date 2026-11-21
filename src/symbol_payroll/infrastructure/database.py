@@ -3,7 +3,7 @@
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -22,8 +22,32 @@ CREATE TABLE IF NOT EXISTS employees (
     active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
     salary_amount TEXT,
     salary_basis TEXT NOT NULL DEFAULT 'unconfirmed'
-        CHECK (salary_basis IN ('gross', 'net', 'unconfirmed'))
+        CHECK (salary_basis IN ('gross', 'net', 'unconfirmed')),
+    hired_on TEXT
 );
+CREATE TABLE IF NOT EXISTS employee_salary_history (
+    id TEXT PRIMARY KEY,
+    employee_id TEXT NOT NULL REFERENCES employees(id),
+    salary_amount TEXT,
+    salary_basis TEXT NOT NULL
+        CHECK (salary_basis IN ('gross', 'net', 'unconfirmed')),
+    effective_from TEXT,
+    version INTEGER NOT NULL CHECK (version > 0),
+    created_at TEXT NOT NULL,
+    UNIQUE(employee_id, effective_from, version)
+);
+CREATE INDEX IF NOT EXISTS employee_salary_history_lookup
+    ON employee_salary_history(employee_id, effective_from, version);
+CREATE TRIGGER IF NOT EXISTS employee_salary_history_no_update
+BEFORE UPDATE ON employee_salary_history
+BEGIN
+    SELECT RAISE(ABORT, 'Salary history is immutable; add a new version');
+END;
+CREATE TRIGGER IF NOT EXISTS employee_salary_history_no_delete
+BEFORE DELETE ON employee_salary_history
+BEGIN
+    SELECT RAISE(ABORT, 'Salary history is immutable and cannot be deleted');
+END;
 CREATE TABLE IF NOT EXISTS payroll_rules (
     id TEXT PRIMARY KEY,
     code TEXT NOT NULL,
@@ -167,70 +191,64 @@ def connect(path: str | Path) -> sqlite3.Connection:
 
 
 def initialize(connection: sqlite3.Connection) -> None:
+    """Create the schema and safely migrate older local payroll databases."""
     with connection:
         connection.executescript(_SCHEMA)
         row = connection.execute("SELECT version FROM schema_meta LIMIT 1").fetchone()
         if row is None:
             connection.execute("INSERT INTO schema_meta(version) VALUES (?)", (SCHEMA_VERSION,))
-        elif row["version"] == 1:
-            columns = {item["name"] for item in connection.execute("PRAGMA table_info(payroll_rules)")}
-            if "category" not in columns:
-                connection.execute(
-                    "ALTER TABLE payroll_rules ADD COLUMN category TEXT NOT NULL DEFAULT 'earning'"
-                )
-            if "title" not in columns:
-                connection.execute(
-                    "ALTER TABLE payroll_rules ADD COLUMN title TEXT NOT NULL DEFAULT ''"
-                )
-            connection.execute(
-                """CREATE TABLE IF NOT EXISTS payroll_inputs (
-                    period_id TEXT NOT NULL REFERENCES payroll_periods(id),
-                    employee_id TEXT NOT NULL REFERENCES employees(id),
-                    shifts TEXT NOT NULL DEFAULT '0',
-                    hours TEXT NOT NULL DEFAULT '0',
-                    sales TEXT NOT NULL DEFAULT '0',
-                    plan TEXT NOT NULL DEFAULT '0',
-                    advances TEXT NOT NULL DEFAULT '0',
-                    deductions TEXT NOT NULL DEFAULT '0',
-                    manual_tax TEXT NOT NULL DEFAULT '0',
-                    fixed_adjustments TEXT NOT NULL DEFAULT '0',
-                    extra_values_json TEXT NOT NULL DEFAULT '{}',
-                    updated_at TEXT NOT NULL,
-                    PRIMARY KEY(period_id, employee_id)
-                )"""
-            )
-            connection.execute("UPDATE schema_meta SET version = ?", (SCHEMA_VERSION,))
-        elif row["version"] == 2:
-            columns = {item["name"] for item in connection.execute("PRAGMA table_info(payroll_rules)")}
-            if "category" not in columns:
-                connection.execute(
-                    "ALTER TABLE payroll_rules ADD COLUMN category TEXT NOT NULL DEFAULT 'earning'"
-                )
-            if "title" not in columns:
-                connection.execute(
-                    "ALTER TABLE payroll_rules ADD COLUMN title TEXT NOT NULL DEFAULT ''"
-                )
-            connection.execute(
-                """CREATE TABLE IF NOT EXISTS payroll_inputs (
-                    period_id TEXT NOT NULL REFERENCES payroll_periods(id),
-                    employee_id TEXT NOT NULL REFERENCES employees(id),
-                    shifts TEXT NOT NULL DEFAULT '0',
-                    hours TEXT NOT NULL DEFAULT '0',
-                    sales TEXT NOT NULL DEFAULT '0',
-                    plan TEXT NOT NULL DEFAULT '0',
-                    advances TEXT NOT NULL DEFAULT '0',
-                    deductions TEXT NOT NULL DEFAULT '0',
-                    manual_tax TEXT NOT NULL DEFAULT '0',
-                    fixed_adjustments TEXT NOT NULL DEFAULT '0',
-                    extra_values_json TEXT NOT NULL DEFAULT '{}',
-                    updated_at TEXT NOT NULL,
-                    PRIMARY KEY(period_id, employee_id)
-                )"""
-            )
-            connection.execute("UPDATE schema_meta SET version = ?", (SCHEMA_VERSION,))
-        elif row["version"] == 3:
-            connection.execute("UPDATE schema_meta SET version = ?", (SCHEMA_VERSION,))
-        elif row["version"] != SCHEMA_VERSION:
+            return
+
+        previous_version = int(row["version"])
+        if previous_version not in (1, 2, 3, 4, SCHEMA_VERSION):
             raise RuntimeError(
-                f"Версия БД {row['version']} не поддерживается; ожидается {SCHEMA_VERSION}"
+                f"Версия БД {previous_version} не поддерживается; ожидается {SCHEMA_VERSION}"
             )
+
+        if previous_version in (1, 2):
+            columns = {
+                item["name"]
+                for item in connection.execute("PRAGMA table_info(payroll_rules)")
+            }
+            if "category" not in columns:
+                connection.execute(
+                    "ALTER TABLE payroll_rules ADD COLUMN category TEXT NOT NULL DEFAULT 'earning'"
+                )
+            if "title" not in columns:
+                connection.execute(
+                    "ALTER TABLE payroll_rules ADD COLUMN title TEXT NOT NULL DEFAULT ''"
+                )
+
+        if previous_version < SCHEMA_VERSION:
+            employee_columns = {
+                item["name"] for item in connection.execute("PRAGMA table_info(employees)")
+            }
+            if "hired_on" not in employee_columns:
+                connection.execute("ALTER TABLE employees ADD COLUMN hired_on TEXT")
+
+            # Older employee cards have no verified effective date. Preserve
+            # their current rate as an undated legacy version, never invent a date.
+            from datetime import datetime, timezone
+            from uuid import uuid4
+
+            legacy_rows = connection.execute(
+                """SELECT id, salary_amount, salary_basis FROM employees
+                   WHERE salary_amount IS NOT NULL
+                     AND NOT EXISTS (
+                         SELECT 1 FROM employee_salary_history h
+                         WHERE h.employee_id = employees.id
+                     )"""
+            ).fetchall()
+            for employee in legacy_rows:
+                connection.execute(
+                    """INSERT INTO employee_salary_history
+                       (id, employee_id, salary_amount, salary_basis,
+                        effective_from, version, created_at)
+                       VALUES (?, ?, ?, ?, NULL, 1, ?)""",
+                    (
+                        str(uuid4()), employee["id"], employee["salary_amount"],
+                        employee["salary_basis"], datetime.now(timezone.utc).isoformat(),
+                    ),
+                )
+
+        connection.execute("UPDATE schema_meta SET version = ?", (SCHEMA_VERSION,))

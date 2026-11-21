@@ -27,10 +27,12 @@ def db(tmp_path):
     create_employee(
         connection, "e1", "s1", "Иванов Иван", "Продавец",
         Decimal("30000"), SalaryBasis.GROSS,
+        date(2020, 1, 1), date(2020, 1, 1),
     )
     create_employee(
         connection, "e2", "s1", "Петров Пётр", "Продавец",
         Decimal("25000"), SalaryBasis.UNCONFIRMED,
+        date(2020, 1, 1), date(2020, 1, 1),
     )
     create_period(connection, "2026-10", date(2026, 10, 1), date(2026, 10, 31))
     yield connection
@@ -106,6 +108,7 @@ def test_period_cannot_be_recalculated_after_approval(db) -> None:
     update_employee(
         db, "e2", "s1", "Петров Пётр", "Продавец",
         Decimal("25000"), SalaryBasis.GROSS,
+        salary_effective_from=date(2020, 1, 1),
     )
     save_period_input(
         db, PeriodEmployeeInput("2026-10", "e1", shifts=Decimal("10"))
@@ -149,7 +152,7 @@ def test_schema_v2_migrates_to_v4_with_rule_metadata_and_inputs(tmp_path) -> Non
     assert {"category", "title"} <= columns
     assert connection.execute(
         "SELECT version FROM schema_meta"
-    ).fetchone()["version"] == 4
+    ).fetchone()["version"] == 5
     assert connection.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='payroll_inputs'"
     ).fetchone() is not None
@@ -251,3 +254,109 @@ def test_new_rule_version_invalidates_calculated_payroll(db) -> None:
         "SELECT status FROM payroll_periods WHERE id='2026-10'"
     ).fetchone()["status"] == "draft"
     assert list_period_snapshots(db, "2026-10") == []
+
+
+
+def test_snapshot_uses_salary_rate_effective_at_month_start(db) -> None:
+    update_employee(
+        db, "e1", "s1", "Иванов Иван", "Продавец",
+        Decimal("45000"), SalaryBasis.GROSS,
+        salary_effective_from=date(2026, 11, 1),
+    )
+    create_period(db, "2026-11", date(2026, 11, 1), date(2026, 11, 30))
+    for period_id in ("2026-10", "2026-11"):
+        for employee_id in ("e1", "e2"):
+            save_period_input(
+                db, PeriodEmployeeInput(period_id, employee_id, shifts=Decimal("10"))
+            )
+
+    october = calculate_period(db, "2026-10")
+    november = calculate_period(db, "2026-11")
+    october_e1 = next(x for x in october.employees if x.employee_id == "e1")
+    november_e1 = next(x for x in november.employees if x.employee_id == "e1")
+    assert next(line.amount for line in october_e1.components if line.code == "base_salary") == Decimal("30000.00")
+    assert next(line.amount for line in november_e1.components if line.code == "base_salary") == Decimal("45000.00")
+
+    oct_snapshot = next(
+        x["snapshot"] for x in list_period_snapshots(db, "2026-10")
+        if x["employee_id"] == "e1"
+    )
+    nov_snapshot = next(
+        x["snapshot"] for x in list_period_snapshots(db, "2026-11")
+        if x["employee_id"] == "e1"
+    )
+    assert oct_snapshot["employment"]["salary_effective_from"] == "2020-01-01"
+    assert nov_snapshot["employment"]["salary_effective_from"] == "2026-11-01"
+
+
+def test_mid_month_salary_change_blocks_full_month_base_and_approval(db) -> None:
+    update_employee(
+        db, "e1", "s1", "Иванов Иван", "Продавец",
+        Decimal("35000"), SalaryBasis.GROSS,
+        salary_effective_from=date(2026, 10, 15),
+    )
+    for employee_id in ("e1", "e2"):
+        save_period_input(
+            db, PeriodEmployeeInput("2026-10", employee_id, shifts=Decimal("10"))
+        )
+
+    result = calculate_period(db, "2026-10")
+    employee = next(x for x in result.employees if x.employee_id == "e1")
+    assert not any(line.code == "base_salary" for line in employee.components)
+    assert any("начинает действовать 2026-10-15 внутри периода" in x for x in result.warnings)
+    with pytest.raises(ValueError, match="Нельзя утвердить ведомость"):
+        transition_period(db, "2026-10", "approved")
+
+
+def test_employee_hire_date_controls_period_inclusion_and_partial_month_approval(db) -> None:
+    create_employee(
+        db, "e3", "s1", "Сидорова Анна", "Продавец",
+        Decimal("30000"), SalaryBasis.GROSS,
+        date(2026, 10, 16), date(2026, 10, 16),
+    )
+    create_period(db, "2026-09", date(2026, 9, 1), date(2026, 9, 30))
+    september = calculate_period(db, "2026-09")
+    assert "e3" not in {x.employee_id for x in september.employees}
+
+    for employee_id in ("e1", "e2", "e3"):
+        save_period_input(
+            db, PeriodEmployeeInput("2026-10", employee_id, shifts=Decimal("10"))
+        )
+    october = calculate_period(db, "2026-10")
+    new_employee = next(x for x in october.employees if x.employee_id == "e3")
+    assert not any(line.code == "base_salary" for line in new_employee.components)
+    assert any("принят в течение периода" in x for x in october.warnings)
+    with pytest.raises(ValueError, match="Нельзя утвердить ведомость"):
+        transition_period(db, "2026-10", "approved")
+
+
+def test_missing_hire_date_blocks_payroll_approval(db) -> None:
+    db.execute("UPDATE employees SET hired_on = NULL WHERE id='e1'")
+    for employee_id in ("e1", "e2"):
+        save_period_input(
+            db, PeriodEmployeeInput("2026-10", employee_id, shifts=Decimal("10"))
+        )
+    result = calculate_period(db, "2026-10")
+    assert any("дата приёма не подтверждена" in x for x in result.warnings)
+    with pytest.raises(ValueError, match="Нельзя утвердить ведомость"):
+        transition_period(db, "2026-10", "approved")
+
+
+
+def test_salary_that_starts_after_period_is_not_applied_retroactively(db) -> None:
+    create_employee(
+        db, "e3", "s1", "Сидорова Анна", "Продавец",
+        Decimal("50000"), SalaryBasis.GROSS,
+        date(2020, 1, 1), date(2026, 12, 1),
+    )
+    for employee_id in ("e1", "e2", "e3"):
+        save_period_input(
+            db, PeriodEmployeeInput("2026-10", employee_id, shifts=Decimal("10"))
+        )
+
+    result = calculate_period(db, "2026-10")
+    new_employee = next(x for x in result.employees if x.employee_id == "e3")
+    assert not any(line.code == "base_salary" for line in new_employee.components)
+    assert any("нет ставки оклада, действующей в расчётном периоде" in x for x in result.warnings)
+    with pytest.raises(ValueError, match="Нельзя утвердить ведомость"):
+        transition_period(db, "2026-10", "approved")

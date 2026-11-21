@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 import uuid
+from datetime import datetime, timezone
 
 from symbol_payroll.legacy_directory_data import LEGACY_DIRECTORY
 
@@ -33,6 +34,15 @@ def import_legacy_directory(connection: sqlite3.Connection) -> dict[str, int]:
                    (id, store_id, full_name, position, active, salary_amount, salary_basis)
                    VALUES (?, ?, ?, NULL, 1, ?, 'unconfirmed')""",
                 (employee_id, store_ids[store], full_name, salary),
+            )
+            history_id = str(uuid.uuid5(
+                uuid.NAMESPACE_URL, f"symbol-payroll:legacy-salary:{employee_id}"
+            ))
+            connection.execute(
+                """INSERT INTO employee_salary_history
+                   (id, employee_id, salary_amount, salary_basis, effective_from, version, created_at)
+                   VALUES (?, ?, ?, 'unconfirmed', NULL, 1, ?)""",
+                (history_id, employee_id, salary, datetime.now(timezone.utc).isoformat()),
             )
     return {
         "stores": len(LEGACY_DIRECTORY["stores"]),
