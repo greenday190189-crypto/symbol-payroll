@@ -54,8 +54,16 @@ def test_export_termination_uses_saved_result_and_contains_details(db, tmp_path)
     assert sheet["D3"].value == "2026-10-15"
     assert sheet["A9"].value == "Оплата фактически отработанного времени"
     assert sheet["C9"].value == 30000.0
-    assert sheet["B15"].value == 20100.0
-    assert "автоматически не начислялись" in sheet["B17"].value
+    totals = {
+        sheet.cell(row, 1).value: sheet.cell(row, 2).value
+        for row in range(1, sheet.max_row + 1)
+    }
+    assert totals["К выплате"] == 20100.0
+    note_row = next(
+        row for row in range(1, sheet.max_row + 1)
+        if sheet.cell(row, 1).value == "Ограничения расчёта"
+    )
+    assert "автоматически не начислялись" in sheet.cell(note_row, 2).value
     workbook.close()
 
 
