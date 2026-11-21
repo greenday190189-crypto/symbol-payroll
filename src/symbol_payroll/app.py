@@ -291,7 +291,11 @@ class CalculationsPage(QWidget):
         self.tax_mode.addItem("НДФЛ не рассчитывать", TaxMode.DISABLED.value)
         self.tax_mode.addItem("НДФЛ введён вручную", TaxMode.MANUAL.value)
         self.tax_mode.addItem("НДФЛ импортирован", TaxMode.IMPORTED.value)
-        self.tax_mode.addItem("Автоматический НДФЛ", TaxMode.AUTOMATIC.value)
+        self.tax_mode.addItem("Автоматический НДФЛ (нужен налоговый профиль)", TaxMode.AUTOMATIC.value)
+        self.tax_mode.model().item(3).setEnabled(False)
+        self.tax_mode.setToolTip(
+            "Автоматический расчёт НДФЛ пока не подключён: требуется подтверждённый налоговый профиль."
+        )
         self.calculate_button = QPushButton("Рассчитать ведомость")
         self.calculate_button.clicked.connect(self.run_calculation)
         self.approve_button = QPushButton("Утвердить ведомость")
