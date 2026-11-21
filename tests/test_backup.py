@@ -3,7 +3,7 @@ from datetime import datetime
 import pytest
 
 from symbol_payroll.infrastructure.backup import (
-    create_backup, default_backup_name, restore_backup, validate_backup,
+    create_backup, create_daily_backup, default_backup_name, restore_backup, validate_backup,
 )
 from symbol_payroll.infrastructure.database import connect, initialize
 
@@ -60,3 +60,24 @@ def test_default_backup_name_is_stable():
     assert default_backup_name(datetime(2026, 11, 21, 12, 30, 45)) == (
         "symbol_payroll_backup_20261121_123045.sqlite3"
     )
+
+
+def test_daily_backup_creates_one_copy_and_keeps_existing_copy(db, tmp_path, monkeypatch):
+    from datetime import datetime
+    import symbol_payroll.infrastructure.backup as backup_module
+
+    fixed = datetime(2026, 11, 21, 10, 0, 0)
+    monkeypatch.setattr(backup_module, "datetime", type(
+        "FixedDateTime", (), {"now": staticmethod(lambda: fixed)}
+    ))
+    folder = tmp_path / "daily"
+    first = create_daily_backup(db, folder)
+    second = create_daily_backup(db, folder)
+    assert first == second
+    assert first.exists()
+    assert len(list(folder.glob("symbol_payroll_auto_*.sqlite3"))) == 1
+
+
+def test_daily_backup_rejects_invalid_retention(db, tmp_path):
+    with pytest.raises(ValueError, match="не меньше"):
+        create_daily_backup(db, tmp_path, retention=0)
