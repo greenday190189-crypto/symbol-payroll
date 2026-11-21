@@ -1391,11 +1391,27 @@ def main() -> int:
 
     migration_backup = None
     try:
-        schema_meta = connection.execute("PRAGMA table_info(schema_meta)").fetchall()
-        if schema_meta:
+        application_tables = {
+            row["name"]
+            for row in connection.execute(
+                """SELECT name FROM sqlite_master
+                   WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"""
+            )
+        }
+        if application_tables and "schema_meta" not in application_tables:
+            raise RuntimeError(
+                "В файле найдены таблицы приложения, но отсутствует schema_meta. "
+                "Автоматическая миграция небезопасна."
+            )
+        if "schema_meta" in application_tables:
             version_row = connection.execute(
                 "SELECT version FROM schema_meta LIMIT 1"
             ).fetchone()
+            if version_row is None and len(application_tables) > 1:
+                raise RuntimeError(
+                    "Таблица schema_meta пуста, хотя в базе уже есть данные приложения. "
+                    "Нужна ручная проверка базы."
+                )
             if version_row is not None:
                 stored_version = int(version_row["version"])
                 if stored_version < SCHEMA_VERSION:
