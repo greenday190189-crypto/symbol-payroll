@@ -1,4 +1,5 @@
 from datetime import datetime
+import sqlite3
 
 import pytest
 
@@ -138,3 +139,29 @@ def test_pre_migration_backup_rejects_mismatched_source_version(db, tmp_path) ->
             db, tmp_path / "pre-migration", source_version=4
         )
     assert list((tmp_path / "pre-migration").glob("*.sqlite3")) == []
+
+
+
+def test_daily_backup_replaces_same_day_copy_from_older_schema(db, tmp_path, monkeypatch):
+    import symbol_payroll.infrastructure.backup as backup_module
+
+    fixed = datetime(2026, 11, 22, 12, 0, 0)
+    monkeypatch.setattr(backup_module, "datetime", type(
+        "FixedDateTime", (), {"now": staticmethod(lambda: fixed)}
+    ))
+    folder = tmp_path / "daily"
+    folder.mkdir()
+    legacy_path = folder / "symbol_payroll_auto_20261122_090000.sqlite3"
+    legacy = sqlite3.connect(legacy_path)
+    legacy.execute("CREATE TABLE schema_meta (version INTEGER NOT NULL)")
+    legacy.execute("INSERT INTO schema_meta(version) VALUES (4)")
+    legacy.commit()
+    legacy.close()
+
+    current = create_daily_backup(db, folder)
+
+    assert current != legacy_path
+    assert current.exists()
+    validate_backup(current)
+    assert legacy_path.exists()
+    assert len(list(folder.glob("symbol_payroll_auto_20261122_*.sqlite3"))) == 2
