@@ -101,9 +101,21 @@ def calculate_period(
                 f"{period_id}:{person.id}", values,
             )
         )
+        termination_date = terminations.get(person.id)
+        terminated_during_period = (
+            termination_date is not None
+            and date.fromisoformat(period["period_start"]) <= termination_date
+            <= date.fromisoformat(period["period_end"])
+        )
+        salary_amount = None if terminated_during_period else person.salary_amount
+        if terminated_during_period:
+            warnings.append(
+                f"{person.full_name}: увольнение внутри периода; полный месячный оклад "
+                "автоматически не начислен. Настройте формулу оплаты фактического времени."
+            )
         employee_inputs.append(
             EmployeeInput(
-                person.id, person.full_name, person.salary_amount,
+                person.id, person.full_name, salary_amount,
                 person.salary_basis, period_input.shifts, period_input.hours,
                 fixed_adjustments=period_input.fixed_adjustments,
                 manual_tax=period_input.manual_tax,
