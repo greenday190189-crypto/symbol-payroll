@@ -38,14 +38,27 @@ class PayrollRule:
         )
 
 
-def select_rule(rules: list[PayrollRule], day: date) -> PayrollRule | None:
-    """Выбирает самое специфичное действующее правило; неоднозначность запрещена."""
-    candidates = [rule for rule in rules if rule.applies_on(day)]
+def select_rule(
+    rules: list[PayrollRule], day: date, scope_ids: dict[RuleScope, str]
+) -> PayrollRule | None:
+    """Выбирает правило для конкретного сотрудника/периода.
+
+    scope_ids задаёт конкретный объект каждого уровня, например магазин, должность,
+    сотрудник и идентификатор исключения на период. Для организации используется '*'.
+    """
+    candidates = [
+        rule for rule in rules
+        if rule.applies_on(day) and scope_ids.get(rule.scope) == rule.scope_id
+    ]
     if not candidates:
         return None
-    priorities = {scope: priority for scope, priority in zip(
-        RuleScope, RulePriority, strict=True
-    )}
+    priorities = {
+        RuleScope.ORGANIZATION: RulePriority.ORGANIZATION,
+        RuleScope.STORE: RulePriority.STORE,
+        RuleScope.POSITION: RulePriority.POSITION,
+        RuleScope.EMPLOYEE: RulePriority.EMPLOYEE,
+        RuleScope.PERIOD: RulePriority.PERIOD_OVERRIDE,
+    }
     highest = max(priorities[rule.scope] for rule in candidates)
     winners = [rule for rule in candidates if priorities[rule.scope] == highest]
     if len(winners) != 1:
