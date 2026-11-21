@@ -188,7 +188,7 @@ def export_period_workbook(
     for record in records:
         store_groups[record["store_name"]].append(record)
 
-    used_titles = {"сводная"}
+    used_titles = {"сводная", "по магазинам"}
     store_summary = workbook.create_sheet("По магазинам")
     store_summary.append(["Магазин", "Сотрудников", "Начислено gross", "НДФЛ", "Удержания", "К выплате"])
     for store_name in sorted(store_groups, key=str.casefold):
