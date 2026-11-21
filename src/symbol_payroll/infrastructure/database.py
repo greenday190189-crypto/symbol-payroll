@@ -89,6 +89,13 @@ CREATE TABLE IF NOT EXISTS termination_cases (
     updated_at TEXT NOT NULL,
     approved_at TEXT
 );
+CREATE TRIGGER IF NOT EXISTS terminated_employee_no_reactivation
+BEFORE UPDATE OF active ON employees
+WHEN NEW.active = 1
+ AND EXISTS (SELECT 1 FROM termination_cases WHERE employee_id = OLD.id)
+BEGIN
+    SELECT RAISE(ABORT, 'Terminated employees cannot be reactivated');
+END;
 CREATE TRIGGER IF NOT EXISTS approved_termination_no_update
 BEFORE UPDATE ON termination_cases
 WHEN OLD.status = 'approved'
