@@ -3,7 +3,7 @@
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -71,6 +71,36 @@ CREATE TABLE IF NOT EXISTS payroll_snapshots (
     created_at TEXT NOT NULL,
     UNIQUE(period_id, employee_id)
 );
+CREATE TABLE IF NOT EXISTS termination_cases (
+    id TEXT PRIMARY KEY,
+    employee_id TEXT NOT NULL UNIQUE REFERENCES employees(id),
+    termination_date TEXT NOT NULL,
+    worked_shifts TEXT NOT NULL DEFAULT '0',
+    worked_hours TEXT NOT NULL DEFAULT '0',
+    advances TEXT NOT NULL DEFAULT '0',
+    other_deductions TEXT NOT NULL DEFAULT '0',
+    manual_tax TEXT NOT NULL DEFAULT '0',
+    components_json TEXT NOT NULL DEFAULT '[]',
+    notes TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'draft'
+        CHECK (status IN ('draft','calculated','approved')),
+    result_json TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    approved_at TEXT
+);
+CREATE TRIGGER IF NOT EXISTS approved_termination_no_update
+BEFORE UPDATE ON termination_cases
+WHEN OLD.status = 'approved'
+BEGIN
+    SELECT RAISE(ABORT, 'Approved termination settlements are immutable');
+END;
+CREATE TRIGGER IF NOT EXISTS approved_termination_no_delete
+BEFORE DELETE ON termination_cases
+WHEN OLD.status = 'approved'
+BEGIN
+    SELECT RAISE(ABORT, 'Approved termination settlements are immutable');
+END;
 CREATE TRIGGER IF NOT EXISTS payroll_rules_no_update
 BEFORE UPDATE ON payroll_rules
 BEGIN
@@ -190,6 +220,8 @@ def initialize(connection: sqlite3.Connection) -> None:
                     PRIMARY KEY(period_id, employee_id)
                 )"""
             )
+            connection.execute("UPDATE schema_meta SET version = ?", (SCHEMA_VERSION,))
+        elif row["version"] == 3:
             connection.execute("UPDATE schema_meta SET version = ?", (SCHEMA_VERSION,))
         elif row["version"] != SCHEMA_VERSION:
             raise RuntimeError(
