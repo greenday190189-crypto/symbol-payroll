@@ -23,7 +23,6 @@ from symbol_payroll.domain.rules import RuleScope
 from symbol_payroll.domain.tax import TaxMode
 from symbol_payroll.infrastructure.database import connect, initialize
 from symbol_payroll.infrastructure.legacy_import import import_legacy_directory
-from symbol_payroll.legacy_directory_data import LEGACY_DIRECTORY
 from symbol_payroll.infrastructure.backup import (
     create_backup, create_daily_backup, default_backup_name, restore_backup, validate_backup,
 )
