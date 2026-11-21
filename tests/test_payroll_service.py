@@ -115,7 +115,7 @@ def test_period_cannot_be_recalculated_after_approval(db) -> None:
 
 
 
-def test_schema_v2_migrates_to_v3_with_rule_metadata_and_inputs(tmp_path) -> None:
+def test_schema_v2_migrates_to_v4_with_rule_metadata_and_inputs(tmp_path) -> None:
     from symbol_payroll.infrastructure.database import connect, initialize
 
     connection = connect(tmp_path / "legacy.sqlite3")
@@ -140,7 +140,7 @@ def test_schema_v2_migrates_to_v3_with_rule_metadata_and_inputs(tmp_path) -> Non
     assert {"category", "title"} <= columns
     assert connection.execute(
         "SELECT version FROM schema_meta"
-    ).fetchone()["version"] == 3
+    ).fetchone()["version"] == 4
     assert connection.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='payroll_inputs'"
     ).fetchone() is not None
