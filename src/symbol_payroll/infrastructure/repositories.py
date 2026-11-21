@@ -124,6 +124,33 @@ def get_salary_rate_for_date(
     )
 
 
+def list_salary_history(
+    connection: sqlite3.Connection, employee_id: str
+) -> list[SalaryRateRecord]:
+    """Return the complete append-only salary history for one employee."""
+    rows = connection.execute(
+        """SELECT * FROM employee_salary_history
+           WHERE employee_id = ?
+           ORDER BY CASE WHEN effective_from IS NULL THEN 0 ELSE 1 END,
+                    effective_from, version""",
+        (employee_id,),
+    ).fetchall()
+    result = []
+    for row in rows:
+        try:
+            amount = Decimal(row["salary_amount"]) if row["salary_amount"] is not None else None
+            basis = SalaryBasis(row["salary_basis"])
+            effective_from = (
+                date.fromisoformat(row["effective_from"]) if row["effective_from"] else None
+            )
+        except (InvalidOperation, ValueError) as exc:
+            raise RuntimeError(f"Повреждена история оклада сотрудника {employee_id}") from exc
+        result.append(SalaryRateRecord(
+            row["id"], row["employee_id"], amount, basis, effective_from, row["version"]
+        ))
+    return result
+
+
 def _latest_salary_rate(
     connection: sqlite3.Connection, employee_id: str
 ) -> SalaryRateRecord | None:
