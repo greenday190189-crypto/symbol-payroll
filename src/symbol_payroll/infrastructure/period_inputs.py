@@ -37,7 +37,13 @@ class PeriodEmployeeInput:
             value = getattr(self, key)
             if not value.is_finite() or value < ZERO:
                 raise ValueError(f"Показатель {key} должен быть конечным и неотрицательным")
+        reserved = {
+            "salary", "salary_net", "shifts", "hours", "sales", "plan",
+            "advances", "deductions", "manual_tax", "fixed_adjustments",
+        }
         for key, value in self.extra_values.items():
+            if key in reserved:
+                raise ValueError(f"Дополнительный показатель не может переопределять {key}")
             if not key.isidentifier():
                 raise ValueError(f"Некорректное имя дополнительного показателя: {key}")
             if not value.is_finite():
