@@ -57,3 +57,35 @@ def test_period_transition_order_is_enforced(db) -> None:
     create_period(db, "p2", date(2026, 10, 1), date(2026, 10, 31))
     with pytest.raises(ValueError, match="Недопустимый переход"):
         transition_period(db, "p2", "approved")
+
+
+def test_persist_calculation_replaces_draft_snapshots_atomically(db) -> None:
+    from decimal import Decimal
+
+    from symbol_payroll.domain.calculation import EmployeeInput, calculate_payroll
+    from symbol_payroll.domain.pay import SalaryBasis
+    from symbol_payroll.infrastructure.payroll_repository import (
+        list_period_snapshots, persist_payroll_result,
+    )
+
+    create_period(db, "p3", date(2026, 10, 1), date(2026, 10, 31))
+    first = calculate_payroll([
+        EmployeeInput("e1", "Иванов Иван", Decimal("30000"), SalaryBasis.GROSS)
+    ])
+    persist_payroll_result(db, "p3", first, ["base_pay:v1"])
+    assert list_period_snapshots(db, "p3")[0]["snapshot"]["gross_total"] == "30000.00"
+    assert db.execute(
+        "SELECT status FROM payroll_periods WHERE id = 'p3'"
+    ).fetchone()["status"] == "calculated"
+
+    revised = calculate_payroll([
+        EmployeeInput("e1", "Иванов Иван", Decimal("35000"), SalaryBasis.GROSS)
+    ])
+    persist_payroll_result(db, "p3", revised, ["base_pay:v2"])
+    snapshots = list_period_snapshots(db, "p3")
+    assert len(snapshots) == 1
+    assert snapshots[0]["snapshot"]["gross_total"] == "35000.00"
+
+    transition_period(db, "p3", "approved")
+    with pytest.raises(ValueError, match="Нельзя пересчитывать"):
+        persist_payroll_result(db, "p3", revised, ["base_pay:v2"])
