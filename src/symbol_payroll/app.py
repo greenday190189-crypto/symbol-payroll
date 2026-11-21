@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import calendar
+import json
 import sys
 import uuid
 from datetime import date
@@ -273,6 +274,7 @@ class CalculationsPage(QWidget):
         ("План", "plan"), ("Аванс", "advances"),
         ("Удержания", "deductions"), ("НДФЛ", "manual_tax"),
         ("Корректировка", "fixed_adjustments"),
+        ("Доп. параметры (JSON)", "extra_values_json"),
     )
 
     def __init__(self, connection) -> None:
@@ -290,7 +292,7 @@ class CalculationsPage(QWidget):
         self.tax_mode = QComboBox()
         self.tax_mode.addItem("НДФЛ не рассчитывать", TaxMode.DISABLED.value)
         self.tax_mode.addItem("НДФЛ введён вручную", TaxMode.MANUAL.value)
-        self.tax_mode.addItem("НДФЛ импортирован", TaxMode.IMPORTED.value)
+        self.tax_mode.addItem("НДФЛ из внешнего расчёта", TaxMode.IMPORTED.value)
         self.tax_mode.addItem("Автоматический НДФЛ (нужен налоговый профиль)", TaxMode.AUTOMATIC.value)
         self.tax_mode.model().item(3).setEnabled(False)
         self.tax_mode.setToolTip(
@@ -320,6 +322,10 @@ class CalculationsPage(QWidget):
         self.input_table.setColumnCount(1 + len(self.INPUT_COLUMNS))
         self.input_table.setHorizontalHeaderLabels(
             ["Сотрудник", *(label for label, _ in self.INPUT_COLUMNS)]
+        )
+        self.input_table.horizontalHeaderItem(9).setToolTip(
+            'Дополнительные числовые переменные для формул, например: '
+            '{"commission_rate": "0.02", "returns": "1500"}'
         )
         self.input_table.setEditTriggers(QTableWidget.EditTrigger.AllEditTriggers)
         self.input_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -395,9 +401,14 @@ class CalculationsPage(QWidget):
             self.input_table.setItem(row, 0, name)
             item = inputs.get(employee.id, PeriodEmployeeInput(period_id, employee.id))
             for column, (_, field_name) in enumerate(self.INPUT_COLUMNS, start=1):
-                self.input_table.setItem(
-                    row, column, QTableWidgetItem(str(getattr(item, field_name)))
-                )
+                if field_name == "extra_values_json":
+                    value = json.dumps(
+                        {key: str(amount) for key, amount in item.extra_values.items()},
+                        ensure_ascii=False,
+                    )
+                else:
+                    value = str(getattr(item, field_name))
+                self.input_table.setItem(row, column, QTableWidgetItem(value))
         self.input_table.resizeColumnsToContents()
         self.load_results(period_id)
         self.status.setText(
@@ -423,10 +434,22 @@ class CalculationsPage(QWidget):
             name_item = self.input_table.item(row, 0)
             employee_id = name_item.data(Qt.ItemDataRole.UserRole)
             values = {}
+            extra_values = {}
             for column, (_, field_name) in enumerate(self.INPUT_COLUMNS, start=1):
                 item = self.input_table.item(row, column)
                 raw = item.text().strip() if item else "0"
-                values[field_name] = Decimal(raw.replace(" ", "").replace(",", ".") or "0")
+                if field_name == "extra_values_json":
+                    payload = json.loads(raw or "{}")
+                    if not isinstance(payload, dict):
+                        raise ValueError("Дополнительные параметры должны быть JSON-объектом")
+                    extra_values = {
+                        str(key): Decimal(str(value).replace(",", "."))
+                        for key, value in payload.items()
+                    }
+                else:
+                    values[field_name] = Decimal(
+                        raw.replace(" ", "").replace(",", ".") or "0"
+                    )
             result.append(PeriodEmployeeInput(
                 period_id, employee_id,
                 shifts=values["shifts"], hours=values["hours"],
@@ -434,6 +457,7 @@ class CalculationsPage(QWidget):
                 plan=values["plan"], deductions=values["deductions"],
                 manual_tax=values["manual_tax"],
                 fixed_adjustments=values["fixed_adjustments"],
+                extra_values=extra_values,
             ))
         return result
 
