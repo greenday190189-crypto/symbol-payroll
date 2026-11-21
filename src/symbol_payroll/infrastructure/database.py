@@ -3,7 +3,7 @@
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -53,6 +53,34 @@ CREATE TABLE IF NOT EXISTS payroll_snapshots (
     created_at TEXT NOT NULL,
     UNIQUE(period_id, employee_id)
 );
+CREATE TRIGGER IF NOT EXISTS payroll_rules_no_update
+BEFORE UPDATE ON payroll_rules
+BEGIN
+    SELECT RAISE(ABORT, 'Payroll rules are immutable; create a new version');
+END;
+CREATE TRIGGER IF NOT EXISTS payroll_rules_no_delete
+BEFORE DELETE ON payroll_rules
+BEGIN
+    SELECT RAISE(ABORT, 'Payroll rules are immutable and cannot be deleted');
+END;
+CREATE TRIGGER IF NOT EXISTS approved_snapshots_no_update
+BEFORE UPDATE ON payroll_snapshots
+WHEN (SELECT status FROM payroll_periods WHERE id = OLD.period_id) IN ('approved', 'closed')
+BEGIN
+    SELECT RAISE(ABORT, 'Approved payroll snapshots are immutable');
+END;
+CREATE TRIGGER IF NOT EXISTS approved_snapshots_no_delete
+BEFORE DELETE ON payroll_snapshots
+WHEN (SELECT status FROM payroll_periods WHERE id = OLD.period_id) IN ('approved', 'closed')
+BEGIN
+    SELECT RAISE(ABORT, 'Approved payroll snapshots are immutable');
+END;
+CREATE TRIGGER IF NOT EXISTS approved_snapshots_no_insert
+BEFORE INSERT ON payroll_snapshots
+WHEN (SELECT status FROM payroll_periods WHERE id = NEW.period_id) IN ('approved', 'closed')
+BEGIN
+    SELECT RAISE(ABORT, 'Cannot add snapshots to an approved payroll period');
+END;
 """
 
 
@@ -71,6 +99,8 @@ def initialize(connection: sqlite3.Connection) -> None:
         row = connection.execute("SELECT version FROM schema_meta LIMIT 1").fetchone()
         if row is None:
             connection.execute("INSERT INTO schema_meta(version) VALUES (?)", (SCHEMA_VERSION,))
+        elif row["version"] == 1:
+            connection.execute("UPDATE schema_meta SET version = ?", (SCHEMA_VERSION,))
         elif row["version"] != SCHEMA_VERSION:
             raise RuntimeError(
                 f"Версия БД {row['version']} не поддерживается; ожидается {SCHEMA_VERSION}"
