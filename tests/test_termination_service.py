@@ -167,3 +167,9 @@ def test_hire_date_is_persisted_in_termination_snapshot_history(db) -> None:
         "SELECT hired_on FROM employees WHERE id='employee-1'"
     ).fetchone()
     assert employee["hired_on"] == "2020-01-01"
+
+
+
+def test_termination_date_cannot_precede_hire_date(db) -> None:
+    with pytest.raises(ValueError, match="раньше даты приёма"):
+        create_termination_case(db, "employee-1", date(2019, 12, 31))
