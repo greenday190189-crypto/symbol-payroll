@@ -59,7 +59,7 @@ class ImportPreviewRow:
     source_row: int
     employee_id: str | None
     employee_name: str
-    values: Mapping[str, Decimal]
+    values: Mapping[str, Decimal | None]
     errors: tuple[str, ...] = ()
 
 
@@ -205,7 +205,10 @@ def build_import_preview(
             values: dict[str, Decimal] = {}
             for field in NUMERIC_FIELDS:
                 index = getattr(mapping, field)
-                raw_value = raw_row[index] if index is not None and index < len(raw_row) else None
+                if index is None:
+                    values[field] = None
+                    continue
+                raw_value = raw_row[index] if index < len(raw_row) else None
                 if index is not None:
                     formula_cell = formula_sheet.cell(row_number, index + 1)
                     if formula_cell.data_type == "f" and raw_value is None:
@@ -250,20 +253,31 @@ def apply_import_preview(
     if period["status"] not in ("draft", "calculated"):
         raise ValueError("Нельзя импортировать данные в утверждённый период")
 
+    from symbol_payroll.infrastructure.period_inputs import list_period_inputs
+
+    existing_inputs = list_period_inputs(connection, period_id)
     prepared: list[PeriodEmployeeInput] = []
     for row in preview.rows:
         if row.employee_id is None:
             raise ValueError(f"Строка {row.source_row}: не определён сотрудник")
+        existing = existing_inputs.get(row.employee_id)
+        def resolved(field: str) -> Decimal:
+            imported = row.values.get(field)
+            if imported is not None:
+                return imported
+            return getattr(existing, field) if existing is not None else Decimal("0")
+
         item = PeriodEmployeeInput(
             period_id, row.employee_id,
-            shifts=row.values.get("shifts", Decimal("0")),
-            hours=row.values.get("hours", Decimal("0")),
-            sales=row.values.get("sales", Decimal("0")),
-            plan=row.values.get("plan", Decimal("0")),
-            advances=row.values.get("advances", Decimal("0")),
-            deductions=row.values.get("deductions", Decimal("0")),
-            manual_tax=row.values.get("manual_tax", Decimal("0")),
-            fixed_adjustments=row.values.get("fixed_adjustments", Decimal("0")),
+            shifts=resolved("shifts"),
+            hours=resolved("hours"),
+            sales=resolved("sales"),
+            plan=resolved("plan"),
+            advances=resolved("advances"),
+            deductions=resolved("deductions"),
+            manual_tax=resolved("manual_tax"),
+            fixed_adjustments=resolved("fixed_adjustments"),
+            extra_values=existing.extra_values if existing is not None else {},
         )
         item.validate()
         prepared.append(item)
