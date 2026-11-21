@@ -1070,7 +1070,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Символ — расчёт заработной платы")
         self.resize(1280, 820)
         self.setMinimumSize(980, 680)
-        self.setStyleSheet(\"\"\"
+        self.setStyleSheet("""
             QWidget { font-size: 10pt; color: #1f2937; }
             QMainWindow, QDialog { background: #f6f8fb; }
             QTabWidget::pane { border: 1px solid #dbe3ed; background: #ffffff; border-radius: 10px; top: -1px; }
@@ -1083,7 +1083,7 @@ class MainWindow(QMainWindow):
             QTableWidget { background: white; alternate-background-color: #f7f9fc; border: 1px solid #dbe3ed; gridline-color: #e5eaf1; border-radius: 8px; }
             QHeaderView::section { background: #edf2f8; color: #334155; padding: 8px; border: 0; border-bottom: 1px solid #dbe3ed; font-weight: 600; }
             QLabel { color: #334155; }
-        \"\"\")
+        """)
         tabs = QTabWidget()
         employee_page = DirectoryPage(connection, employees=True)
         tabs.addTab(CalculationsPage(connection), "Расчёты")
