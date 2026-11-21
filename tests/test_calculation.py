@@ -100,3 +100,14 @@ def test_net_salary_is_not_misreported_as_gross() -> None:
     assert item.gross_total == Decimal("0.00")
     assert item.net_total == Decimal("40000.00")
     assert item.components[0].category == "net_salary"
+
+
+def test_automatic_tax_rejects_net_salary_until_gross_up_exists() -> None:
+    net_employee = EmployeeInput(
+        "net", "Net Employee", Decimal("40000"), SalaryBasis.NET
+    )
+    with pytest.raises(ValueError, match="требует подтверждённого gross"):
+        calculate_payroll(
+            [net_employee], tax_mode=TaxMode.AUTOMATIC,
+            tax_calculator=lambda employee, base: Decimal("0"),
+        )
