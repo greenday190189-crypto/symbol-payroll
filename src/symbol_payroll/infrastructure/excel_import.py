@@ -16,7 +16,7 @@ from symbol_payroll.infrastructure.period_inputs import PeriodEmployeeInput
 
 
 ALIASES: dict[str, tuple[str, ...]] = {
-    "employee_name": ("фио", "сотрудник", "работник", "имя сотрудника", "employee", "full name"),
+    "employee_name": ("фио", "фио сотрудника", "сотрудник", "работник", "имя сотрудника", "employee", "full name"),
     "shifts": ("смены", "смен", "количество смен", "отработано смен"),
     "hours": ("часы", "часов", "отработано часов", "часы факт"),
     "sales": ("продажи", "выручка", "оборот", "сумма продаж"),
