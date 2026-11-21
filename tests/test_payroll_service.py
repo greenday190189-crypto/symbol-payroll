@@ -145,3 +145,19 @@ def test_schema_v2_migrates_to_v3_with_rule_metadata_and_inputs(tmp_path) -> Non
         "SELECT name FROM sqlite_master WHERE type='table' AND name='payroll_inputs'"
     ).fetchone() is not None
     connection.close()
+
+
+
+def test_editing_inputs_invalidates_previous_calculation(db) -> None:
+    save_period_input(
+        db, PeriodEmployeeInput("2026-10", "e1", shifts=Decimal("10"))
+    )
+    calculate_period(db, "2026-10")
+    assert len(list_period_snapshots(db, "2026-10")) == 2
+    save_period_input(
+        db, PeriodEmployeeInput("2026-10", "e1", shifts=Decimal("11"))
+    )
+    assert list_period_snapshots(db, "2026-10") == []
+    assert db.execute(
+        "SELECT status FROM payroll_periods WHERE id='2026-10'"
+    ).fetchone()["status"] == "draft"
