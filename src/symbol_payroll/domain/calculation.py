@@ -114,31 +114,38 @@ class TaxCalculator(Protocol):
 
 
 def _allocate(pool: BonusPool, employees: dict[str, EmployeeInput]) -> dict[str, Decimal]:
-    """Распределяет фонд между получателями с точностью до копейки."""
-    if pool.method is AllocationMethod.EQUAL:
-        bases = {person: Decimal("1") for person in pool.recipients}
-    elif pool.method is AllocationMethod.SHIFTS:
-        bases = {person: employees[person].shifts for person in pool.recipients}
-    elif pool.method is AllocationMethod.HOURS:
-        bases = {person: employees[person].hours for person in pool.recipients}
-    else:
-        bases = {person: pool.weights.get(person, ZERO) for person in pool.recipients}
+    """Распределяет долю фонда получателям с учётом отдельного списка участников.
 
-    denominator = sum(bases.values(), ZERO)
+    Участники формируют знаменатель фонда. Получатели получают свои доли, но не
+    обязательно исчерпывают весь фонд: нераспределённый остаток остаётся видимым.
+    """
+    if pool.method is AllocationMethod.EQUAL:
+        participant_bases = {person: Decimal("1") for person in pool.participants}
+        recipient_bases = {person: Decimal("1") for person in pool.recipients}
+    elif pool.method is AllocationMethod.SHIFTS:
+        participant_bases = {person: employees[person].shifts for person in pool.participants}
+        recipient_bases = {person: employees[person].shifts for person in pool.recipients}
+    elif pool.method is AllocationMethod.HOURS:
+        participant_bases = {person: employees[person].hours for person in pool.participants}
+        recipient_bases = {person: employees[person].hours for person in pool.recipients}
+    else:
+        participant_bases = {person: pool.weights.get(person, ZERO) for person in pool.participants}
+        recipient_bases = {person: pool.weights.get(person, ZERO) for person in pool.recipients}
+
+    denominator = sum(participant_bases.values(), ZERO)
     if denominator <= ZERO:
         raise ValueError(
-            f"Премиальный фонд {pool.code}: сумма базы распределения равна нулю"
+            f"Премиальный фонд {pool.code}: сумма базы участников равна нулю"
         )
 
-    result: dict[str, Decimal] = {}
-    remaining = money(pool.amount)
-    for index, person in enumerate(pool.recipients):
-        if index == len(pool.recipients) - 1:
-            share = remaining
-        else:
-            share = money(pool.amount * bases[person] / denominator)
-            remaining -= share
-        result[person] = share
+    result = {
+        person: money(pool.amount * recipient_bases[person] / denominator)
+        for person in pool.recipients
+    }
+    if set(pool.recipients) == set(pool.participants):
+        # При полном совпадении списков устраняем копеечную разницу округления.
+        last = pool.recipients[-1]
+        result[last] += money(pool.amount) - sum(result.values(), ZERO)
     return result
 
 
