@@ -23,7 +23,7 @@ from symbol_payroll.domain.rules import RuleScope
 from symbol_payroll.domain.tax import TaxMode
 from symbol_payroll.infrastructure.database import connect, initialize
 from symbol_payroll.infrastructure.backup import (
-    create_backup, default_backup_name, restore_backup, validate_backup,
+    create_backup, create_daily_backup, default_backup_name, restore_backup, validate_backup,
 )
 from symbol_payroll.infrastructure.excel_import import (
     FIELD_LABELS, ColumnMapping, apply_import_preview, build_import_preview,
@@ -1122,6 +1122,13 @@ def main() -> int:
     ))
     connection = connect(data_dir / "symbol_payroll.sqlite3")
     initialize(connection)
+    try:
+        create_daily_backup(connection, data_dir / "backups", retention=30)
+    except Exception as exc:
+        QMessageBox.warning(
+            None, "Не удалось создать автоматическую копию",
+            f"Приложение продолжит работу, но резервная копия не создана:\n{exc}",
+        )
     window = MainWindow(connection, data_dir / "symbol_payroll.sqlite3")
     window.show()
     result = app.exec()
