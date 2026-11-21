@@ -57,6 +57,74 @@ def create_backup(
     return destination
 
 
+def create_pre_migration_backup(
+    connection: sqlite3.Connection,
+    directory: str | Path,
+    source_version: int,
+    retention: int = 30,
+) -> Path:
+    """Preserve an older schema before initialize() applies a database migration.
+
+    These files intentionally keep their original schema version and therefore
+    are emergency recovery copies, not restore candidates for the current UI.
+    """
+    if source_version >= SCHEMA_VERSION:
+        raise ValueError("Предмиграционная копия нужна только для старой версии базы")
+    if retention < 1:
+        raise ValueError("Срок хранения должен быть не меньше одной копии")
+
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    now = datetime.now()
+    destination = directory / (
+        f"symbol_payroll_pre_migration_v{source_version}_"
+        f"{now:%Y%m%d_%H%M%S}.sqlite3"
+    )
+    if destination.resolve() == Path(
+        connection.execute("PRAGMA database_list").fetchone()[2]
+    ).resolve():
+        raise ValueError("Нельзя перезаписывать рабочую базу резервной копией")
+
+    temporary = destination.with_name(destination.name + ".tmp")
+    if temporary.exists():
+        temporary.unlink()
+    target = sqlite3.connect(temporary)
+    try:
+        connection.backup(target)
+        integrity = target.execute("PRAGMA integrity_check").fetchone()
+        if integrity is None or integrity[0] != "ok":
+            raise ValueError("Предмиграционная копия не прошла проверку целостности")
+        foreign_keys = target.execute("PRAGMA foreign_key_check").fetchall()
+        if foreign_keys:
+            raise ValueError(
+                "Предмиграционная копия содержит нарушения внешних ключей"
+            )
+        try:
+            version = target.execute(
+                "SELECT version FROM schema_meta LIMIT 1"
+            ).fetchone()
+        except sqlite3.DatabaseError as exc:
+            raise ValueError("Не удалось прочитать версию старой базы") from exc
+        if version is None or int(version[0]) != source_version:
+            raise ValueError(
+                "Версия базы изменилась во время создания предмиграционной копии"
+            )
+        target.execute("PRAGMA journal_mode = DELETE")
+        target.commit()
+    except Exception:
+        target.close()
+        temporary.unlink(missing_ok=True)
+        raise
+    else:
+        target.close()
+
+    temporary.replace(destination)
+    backups = sorted(directory.glob("symbol_payroll_pre_migration_v*_*.sqlite3"))
+    for old in backups[:-retention]:
+        old.unlink(missing_ok=True)
+    return destination
+
+
 def validate_backup(source: str | Path) -> None:
     """Проверяет целостность, внешние ключи и совместимость схемы."""
     source = Path(source)
