@@ -13,14 +13,19 @@ from pathlib import Path
 from PySide6.QtCore import QDate, QStandardPaths, Qt
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDateEdit, QDialog, QDialogButtonBox,
-    QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton,
-    QTabWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
+    QMessageBox, QPushButton, QSpinBox, QTabWidget, QTableWidget,
+    QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from symbol_payroll.domain.pay import SalaryBasis
 from symbol_payroll.domain.rules import RuleScope
 from symbol_payroll.domain.tax import TaxMode
 from symbol_payroll.infrastructure.database import connect, initialize
+from symbol_payroll.infrastructure.excel_import import (
+    FIELD_LABELS, ColumnMapping, apply_import_preview, build_import_preview,
+    list_workbook_sheets, read_headers, suggest_mapping,
+)
 from symbol_payroll.infrastructure.period_inputs import (
     PeriodEmployeeInput, list_period_inputs, save_period_input,
 )
@@ -268,6 +273,190 @@ class RulesPage(QWidget):
             QMessageBox.critical(self, "Ошибка сохранения", str(exc))
 
 
+class ExcelImportDialog(QDialog):
+    def __init__(self, connection, period_id: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.connection = connection
+        self.period_id = period_id
+        self.preview = None
+        self.setWindowTitle(f"Импорт Excel — {period_id}")
+        self.resize(980, 680)
+
+        self.file_path = QLineEdit()
+        self.file_path.setReadOnly(True)
+        self.browse_button = QPushButton("Выбрать файл…")
+        self.browse_button.clicked.connect(self.choose_file)
+        file_row = QHBoxLayout()
+        file_row.addWidget(self.file_path, 1)
+        file_row.addWidget(self.browse_button)
+
+        self.sheet = QComboBox()
+        self.sheet.currentTextChanged.connect(self.load_headers)
+        self.store = QComboBox()
+        for store in list_stores(connection):
+            self.store.addItem(store.name, store.id)
+        self.header_row = QSpinBox()
+        self.header_row.setRange(1, 1000)
+        self.header_row.setValue(1)
+        self.header_row.valueChanged.connect(self.load_headers)
+
+        form = QFormLayout()
+        form.addRow("Лист Excel", self.sheet)
+        form.addRow("Магазин для этого листа", self.store)
+        form.addRow("Строка заголовков", self.header_row)
+
+        self.mapping_controls: dict[str, QComboBox] = {}
+        mapping_form = QFormLayout()
+        for field, label in FIELD_LABELS.items():
+            control = QComboBox()
+            control.addItem("Не импортировать", None)
+            self.mapping_controls[field] = control
+            mapping_form.addRow(label, control)
+
+        self.preview_button = QPushButton("Проверить и показать предпросмотр")
+        self.preview_button.clicked.connect(self.make_preview)
+        self.import_button = QPushButton("Импортировать проверенные данные")
+        self.import_button.setEnabled(False)
+        self.import_button.clicked.connect(self.apply_import)
+        self.status = QLabel(
+            "Выберите файл, лист и магазин. Данные не будут записаны до проверки и подтверждения."
+        )
+        self.status.setWordWrap(True)
+
+        self.preview_table = QTableWidget()
+        self.preview_table.setColumnCount(7)
+        self.preview_table.setHorizontalHeaderLabels(
+            ["Строка Excel", "Сотрудник", "Смены", "Часы", "Продажи", "Аванс", "Проверка"]
+        )
+        self.preview_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.preview_table.setAlternatingRowColors(True)
+
+        buttons = QHBoxLayout()
+        buttons.addWidget(self.preview_button)
+        buttons.addWidget(self.import_button)
+        buttons.addStretch(1)
+        cancel = QPushButton("Закрыть")
+        cancel.clicked.connect(self.reject)
+        buttons.addWidget(cancel)
+
+        layout = QVBoxLayout(self)
+        layout.addLayout(file_row)
+        layout.addLayout(form)
+        layout.addWidget(QLabel("Сопоставление колонок"))
+        layout.addLayout(mapping_form)
+        layout.addWidget(self.status)
+        layout.addWidget(self.preview_table, 1)
+        layout.addLayout(buttons)
+
+    def choose_file(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Выберите расчётную ведомость", "",
+            "Excel (*.xlsx *.xlsm);;Все файлы (*.*)",
+        )
+        if not path:
+            return
+        try:
+            sheets = list_workbook_sheets(path)
+            self.file_path.setText(path)
+            self.sheet.blockSignals(True)
+            self.sheet.clear()
+            self.sheet.addItems(sheets)
+            self.sheet.blockSignals(False)
+            self.preview = None
+            self.preview_table.setRowCount(0)
+            self.import_button.setEnabled(False)
+            self.load_headers()
+        except Exception as exc:
+            QMessageBox.critical(self, "Не удалось открыть Excel", str(exc))
+
+    def load_headers(self, *_args) -> None:
+        path = self.file_path.text()
+        sheet_name = self.sheet.currentText()
+        if not path or not sheet_name:
+            return
+        try:
+            headers = read_headers(path, sheet_name, self.header_row.value())
+            suggestion = suggest_mapping(headers)
+            for field, control in self.mapping_controls.items():
+                control.blockSignals(True)
+                control.clear()
+                control.addItem("Не импортировать", None)
+                for index, header in enumerate(headers):
+                    label = header or f"Колонка {index + 1}"
+                    control.addItem(f"{label} (столбец {index + 1})", index)
+                selected = getattr(suggestion, field)
+                found = control.findData(selected) if selected is not None else 0
+                control.setCurrentIndex(max(found, 0))
+                control.blockSignals(False)
+            self.preview = None
+            self.import_button.setEnabled(False)
+            self.status.setText(
+                f"Заголовки прочитаны: {len(headers)} колонок. "
+                "Проверьте автоматическое сопоставление и запустите предпросмотр."
+            )
+        except Exception as exc:
+            self.status.setText(f"Не удалось прочитать заголовки: {exc}")
+
+    def make_preview(self) -> None:
+        try:
+            if not self.file_path.text():
+                raise ValueError("Сначала выберите Excel-файл")
+            mapping = ColumnMapping(**{
+                field: control.currentData()
+                for field, control in self.mapping_controls.items()
+            })
+            self.preview = build_import_preview(
+                self.connection, self.file_path.text(), self.sheet.currentText(),
+                self.store.currentData(), self.header_row.value(), mapping,
+            )
+            self.preview_table.setRowCount(len(self.preview.rows))
+            for row_index, row in enumerate(self.preview.rows):
+                values = [
+                    str(row.source_row), row.employee_name,
+                    str(row.values.get("shifts", 0)),
+                    str(row.values.get("hours", 0)),
+                    str(row.values.get("sales", 0)),
+                    str(row.values.get("advances", 0)),
+                    "ОШИБКА: " + "; ".join(row.errors) if row.errors else "Готово",
+                ]
+                for column, value in enumerate(values):
+                    self.preview_table.setItem(
+                        row_index, column, QTableWidgetItem(value)
+                    )
+            self.preview_table.resizeColumnsToContents()
+            if self.preview.errors:
+                self.status.setText(
+                    f"Проверено строк: {len(self.preview.rows)}. "
+                    f"Допущено: {self.preview.valid_count}. "
+                    f"Ошибок: {len(self.preview.errors)}. "
+                    "Импорт заблокирован до исправления всех ошибок."
+                )
+                self.import_button.setEnabled(False)
+            else:
+                self.status.setText(
+                    f"Предпросмотр готов: {self.preview.valid_count} строк без ошибок. "
+                    "Проверьте данные и нажмите «Импортировать»."
+                )
+                self.import_button.setEnabled(self.preview.valid_count > 0)
+        except Exception as exc:
+            self.preview = None
+            self.import_button.setEnabled(False)
+            QMessageBox.warning(self, "Предпросмотр не выполнен", str(exc))
+
+    def apply_import(self) -> None:
+        if self.preview is None:
+            return
+        try:
+            count = apply_import_preview(self.connection, self.period_id, self.preview)
+            QMessageBox.information(
+                self, "Импорт завершён",
+                f"Импортировано строк: {count}. Проверьте показатели в таблице расчёта.",
+            )
+            self.accept()
+        except Exception as exc:
+            QMessageBox.critical(self, "Импорт отменён", str(exc))
+
+
 class CalculationsPage(QWidget):
     INPUT_COLUMNS = (
         ("Смены", "shifts"), ("Часы", "hours"), ("Продажи", "sales"),
@@ -289,6 +478,8 @@ class CalculationsPage(QWidget):
         self.create_button.clicked.connect(self.create_month)
         self.save_button = QPushButton("Сохранить вводные")
         self.save_button.clicked.connect(self.save_inputs)
+        self.import_button = QPushButton("Импорт Excel")
+        self.import_button.clicked.connect(self.import_excel)
         self.tax_mode = QComboBox()
         self.tax_mode.addItem("НДФЛ не рассчитывать", TaxMode.DISABLED.value)
         self.tax_mode.addItem("НДФЛ введён вручную", TaxMode.MANUAL.value)
@@ -312,6 +503,7 @@ class CalculationsPage(QWidget):
         top.addWidget(self.create_button)
         actions = QHBoxLayout()
         actions.addWidget(self.save_button)
+        actions.addWidget(self.import_button)
         actions.addWidget(QLabel("Режим НДФЛ:"))
         actions.addWidget(self.tax_mode)
         actions.addWidget(self.calculate_button)
@@ -422,6 +614,7 @@ class CalculationsPage(QWidget):
             else QTableWidget.EditTrigger.NoEditTriggers
         )
         self.save_button.setEnabled(editable)
+        self.import_button.setEnabled(editable)
         self.calculate_button.setEnabled(editable)
         self.approve_button.setEnabled(False)
 
@@ -460,6 +653,19 @@ class CalculationsPage(QWidget):
                 extra_values=extra_values,
             ))
         return result
+
+
+    def import_excel(self) -> None:
+        period_id = self.period.currentData()
+        if not period_id:
+            QMessageBox.warning(self, "Импорт Excel", "Сначала создайте расчётный месяц")
+            return
+        dialog = ExcelImportDialog(self.connection, period_id, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.load_period()
+            self.status.setText(
+                "Импорт завершён. Проверьте показатели и выполните расчёт ведомости."
+            )
 
     def save_inputs(self) -> None:
         try:
