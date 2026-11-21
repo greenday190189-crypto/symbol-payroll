@@ -7,8 +7,7 @@ from openpyxl import Workbook
 from symbol_payroll.domain.pay import SalaryBasis
 from symbol_payroll.infrastructure.database import connect, initialize
 from symbol_payroll.infrastructure.excel_import import (
-    ColumnMapping, apply_import_preview, build_import_preview, read_headers,
-    suggest_mapping,
+    apply_import_preview, build_import_preview, read_headers, suggest_mapping,
 )
 from symbol_payroll.infrastructure.payroll_repository import create_period
 from symbol_payroll.infrastructure.repositories import create_employee, create_store
