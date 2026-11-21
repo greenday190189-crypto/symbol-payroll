@@ -27,6 +27,8 @@ def _snapshot(employee_id, name, gross, tax, deductions, net):
     return {
         "employee_id": employee_id,
         "full_name": name,
+        "store_name": "Сигаево" if employee_id == "e1" else "Дачная",
+        "position": "Продавец",
         "components": [
             {"code": "base", "title": "Оклад", "amount": gross, "category": "earning"},
             {"code": "tax", "title": "НДФЛ", "amount": tax, "category": "deduction"},
@@ -68,9 +70,10 @@ def test_export_contains_network_store_and_personal_sheets(db, tmp_path) -> None
     employee_sheet = next(
         workbook[name] for name in workbook.sheetnames if name.startswith("Иванов Иван")
     )
-    assert employee_sheet["B2"].value == "Иванов Иван"
-    assert employee_sheet["A6"].value == "Оклад"
-    assert employee_sheet["C6"].value == 50000.0
+    assert employee_sheet["B3"].value == "Иванов Иван"
+    assert employee_sheet["B2"].value == "Сигаево"
+    assert employee_sheet["A8"].value == "Оклад"
+    assert employee_sheet["C8"].value == 50000.0
     workbook.close()
 
 
