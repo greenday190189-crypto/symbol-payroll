@@ -105,3 +105,36 @@ def test_period_cannot_be_recalculated_after_approval(db) -> None:
     transition_period(db, "2026-10", "approved")
     with pytest.raises(ValueError, match="Можно рассчитывать только"):
         calculate_period(db, "2026-10")
+
+
+
+def test_schema_v2_migrates_to_v3_with_rule_metadata_and_inputs(tmp_path) -> None:
+    from symbol_payroll.infrastructure.database import connect, initialize
+
+    connection = connect(tmp_path / "legacy.sqlite3")
+    connection.executescript(
+        """
+        CREATE TABLE schema_meta (version INTEGER NOT NULL);
+        INSERT INTO schema_meta(version) VALUES (2);
+        CREATE TABLE payroll_rules (
+            id TEXT PRIMARY KEY, code TEXT NOT NULL,
+            scope TEXT NOT NULL, scope_id TEXT NOT NULL,
+            expression TEXT NOT NULL, version INTEGER NOT NULL,
+            effective_from TEXT NOT NULL, effective_to TEXT,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            UNIQUE(code, scope, scope_id, version)
+        );
+        """
+    )
+    initialize(connection)
+    columns = {
+        row["name"] for row in connection.execute("PRAGMA table_info(payroll_rules)")
+    }
+    assert {"category", "title"} <= columns
+    assert connection.execute(
+        "SELECT version FROM schema_meta"
+    ).fetchone()["version"] == 3
+    assert connection.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='payroll_inputs'"
+    ).fetchone() is not None
+    connection.close()
